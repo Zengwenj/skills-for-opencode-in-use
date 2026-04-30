@@ -1,0 +1,7 @@
+.venv/
+.pytest_cache/
+__pycache__/
+live-repeat-output/
+dist/
+HANDOFF-2026-04-01.md
+mineru..env
