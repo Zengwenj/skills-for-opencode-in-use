@@ -1,0 +1,117 @@
+{
+  "pdf_info": [
+    {
+      "para_blocks": [
+        {
+          "bbox": [
+            23,
+            43,
+            403,
+            77
+          ],
+          "type": "title",
+          "angle": 0,
+          "lines": [
+            {
+              "bbox": [
+                23,
+                43,
+                403,
+                77
+              ],
+              "spans": [
+                {
+                  "bbox": [
+                    23,
+                    43,
+                    403,
+                    77
+                  ],
+                  "type": "text",
+                  "content": "MineU Repeat Validation"
+                }
+              ]
+            }
+          ],
+          "index": 0
+        },
+        {
+          "bbox": [
+            21,
+            101,
+            430,
+            122
+          ],
+          "type": "text",
+          "angle": 0,
+          "lines": [
+            {
+              "bbox": [
+                21,
+                101,
+                430,
+                122
+              ],
+              "spans": [
+                {
+                  "bbox": [
+                    21,
+                    101,
+                    430,
+                    122
+                  ],
+                  "type": "text",
+                  "content": "PNG sample for repeated output-root validation"
+                }
+              ]
+            }
+          ],
+          "index": 1
+        },
+        {
+          "bbox": [
+            22,
+            141,
+            618,
+            162
+          ],
+          "type": "text",
+          "angle": 0,
+          "lines": [
+            {
+              "bbox": [
+                22,
+                141,
+                618,
+                162
+              ],
+              "spans": [
+                {
+                  "bbox": [
+                    22,
+                    141,
+                    618,
+                    162
+                  ],
+                  "type": "text",
+                  "content": "If stale JSON cleanup works, second run removes inserted stale files."
+                }
+              ]
+            }
+          ],
+          "index": 2
+        }
+      ],
+      "discarded_blocks": [],
+      "page_size": [
+        640,
+        320
+      ],
+      "page_idx": 0
+    }
+  ],
+  "_backend": "hybrid",
+  "_ocr_enable": true,
+  "_vlm_ocr_enable": true,
+  "_version_name": "2.7.6"
+}

@@ -1,0 +1,16 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": [
+    "scripts",
+    "tests"
+  ],
+  "exclude": [
+    ".venv",
+    "dist",
+    "live-repeat-output"
+  ],
+  "ignore": [
+    ".venv"
+  ]
+}

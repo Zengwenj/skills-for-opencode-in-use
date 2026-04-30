@@ -1,0 +1,56 @@
+[
+  [
+    {
+      "type": "title",
+      "content": {
+        "title_content": [
+          {
+            "type": "text",
+            "content": "MineU Repeat Validation "
+          }
+        ],
+        "level": 1
+      },
+      "bbox": [
+        35,
+        134,
+        629,
+        240
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": {
+        "paragraph_content": [
+          {
+            "type": "text",
+            "content": "PNG sample for repeated output-root validation "
+          }
+        ]
+      },
+      "bbox": [
+        32,
+        315,
+        671,
+        381
+      ]
+    },
+    {
+      "type": "paragraph",
+      "content": {
+        "paragraph_content": [
+          {
+            "type": "text",
+            "content": "If stale JSON cleanup works, second run removes inserted stale files. "
+          }
+        ]
+      },
+      "bbox": [
+        34,
+        440,
+        965,
+        506
+      ]
+    }
+  ]
+]

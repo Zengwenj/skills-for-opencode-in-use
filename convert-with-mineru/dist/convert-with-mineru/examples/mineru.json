@@ -1,0 +1,5 @@
+{
+  "MINERU_TOKEN": "<在这里填写你的 MineU Token>",
+  "DEFAULT_OUTPUT_ROOT": "",
+  "KEEP_RAW_TREE": false
+}
