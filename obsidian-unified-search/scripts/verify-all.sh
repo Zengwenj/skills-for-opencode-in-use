@@ -2,11 +2,17 @@
 # 完整环境验证脚本
 
 echo "========================================"
-echo "   Obsidian 三层搜索方案验证"
+echo "   Obsidian 搜索与高级查询验证"
 echo "========================================"
 echo ""
 
-VAULT_PATH="${OBSIDIAN_VAULT:-D:\ObsBocdVault}"
+# OBSIDIAN_VAULT：用户自定义 Vault 路径，优先级最高
+# DEFAULT_VAULT_PATH：通用默认值（当前本机示例路径）
+DEFAULT_VAULT_PATH='D:\ObsBocdVault'
+VAULT_PATH="${OBSIDIAN_VAULT:-$DEFAULT_VAULT_PATH}"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+QUERY_PATTERNS_FILE="$SCRIPT_DIR/references/cli-query-patterns.md"
+SKILL_FILE="$SCRIPT_DIR/SKILL.md"
 echo "Vault 路径: $VAULT_PATH"
 echo ""
 
@@ -28,8 +34,38 @@ else
 fi
 echo ""
 
-# 检查 2: 社区 CLI (obs)
-echo "【检查 2】社区 CLI (obs)"
+# 检查 2: 高级查询材料
+echo "【检查 2】高级查询材料（references/cli-query-patterns.md + SKILL.md 关键词）"
+if [ -f "$QUERY_PATTERNS_FILE" ]; then
+    echo "  ✅ cli-query-patterns.md 存在"
+else
+    echo "  ❌ cli-query-patterns.md 缺失"
+fi
+
+if [ -f "$SKILL_FILE" ]; then
+    echo "  检查 SKILL.md 高级命令关键词..."
+    missing_keywords=()
+    for keyword in tasks tags properties backlinks links outline read; do
+        if grep -Eq "(^|[^[:alnum:]_])${keyword}([^[:alnum:]_]|$)" "$SKILL_FILE"; then
+            echo "     ✅ $keyword"
+        else
+            echo "     ❌ $keyword"
+            missing_keywords+=("$keyword")
+        fi
+    done
+
+    if [ ${#missing_keywords[@]} -eq 0 ]; then
+        echo "  ✅ 高级命令关键词齐全"
+    else
+        echo "  ⚠️  缺少关键词: ${missing_keywords[*]}"
+    fi
+else
+    echo "  ❌ SKILL.md 缺失"
+fi
+echo ""
+
+# 检查 3: 社区 CLI (obs)
+echo "【检查 3】社区 CLI (obs)"
 if command -v obs &>/dev/null; then
     echo "  ✅ 已安装"
     obs --version | sed 's/^/     /'
@@ -57,8 +93,8 @@ else
 fi
 echo ""
 
-# 检查 3: Omnisearch HTTP
-echo "【检查 3】Omnisearch HTTP"
+# 检查 4: Omnisearch HTTP
+echo "【检查 4】Omnisearch HTTP"
 if curl -s --max-time 2 "http://localhost:51361/search?q=test" &>/dev/null; then
     echo "  ✅ 服务运行正常"
     echo "  测试搜索..."
@@ -77,8 +113,8 @@ else
 fi
 echo ""
 
-# 检查 4: ripgrep (可选)
-echo "【检查 4】ripgrep (可选)"
+# 检查 5: ripgrep (可选)
+echo "【检查 5】ripgrep (可选)"
 if command -v rg &>/dev/null; then
     echo "  ✅ 已安装"
     rg --version | head -1 | sed 's/^/     /'
@@ -105,12 +141,12 @@ echo "可用搜索方案: $available/3"
 echo ""
 
 if [ $available -ge 2 ]; then
-    echo "✅ 三层搜索方案已就绪！"
+    echo "✅ 基础搜索方案已就绪！"
     echo ""
     echo "使用方式:"
     echo "  1. Bash:  ~/.config/opencode/skills/obsidian-unified-search/scripts/smart-search.sh '关键词'"
     echo "  2. PS:    ~/.config/opencode/skills/obsidian-unified-search/scripts/smart-search-simple.ps1 -Query '关键词'"
-    echo "  3. OpenCode: 直接说'帮我搜索 XXX'"
+    echo "  3. OpenCode: 直接说'帮我搜索 会议纪要'"
 else
     echo "⚠️  部分方案未就绪"
     echo ""

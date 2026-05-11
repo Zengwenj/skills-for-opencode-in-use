@@ -2,17 +2,17 @@
 
 ## 安装步骤
 
-由于 Omnisearch 是 Obsidian 插件，需要在 Obsidian 应用内手动安装：
+Omnisearch 是 Obsidian 插件，需要在 Obsidian 应用内手动安装：
 
 ### 步骤 1：打开 Obsidian
 
-启动 Obsidian 应用并打开你的 vault：`D:\ObsBocdVault`
+启动 Obsidian 应用并打开你的 vault：`D:\ObsBocdVault`（示例/当前配置）
 
 ### 步骤 2：安装 Omnisearch 插件
 
 1. 点击左下角的 **设置**（齿轮图标）
 2. 选择 **第三方插件**（Community Plugins）
-3. 关闭 **安全模式**（Safe Mode）- 点击 Turn off
+3. 关闭 **安全模式**（Safe Mode） - 点击 Turn off
 4. 点击 **浏览**（Browse）
 5. 搜索 **"Omnisearch"**
 6. 点击 **安装**（Install）
@@ -35,14 +35,44 @@
 curl http://localhost:51361/search?q=欢迎
 ```
 
-如果返回 JSON 格式的搜索结果，说明配置成功！
+如果返回 JSON 格式的搜索结果，说明配置成功。
 
 ## 配置检查清单
 
-- [ ] Obsidian 已打开 vault: D:\ObsBocdVault
+- [ ] Obsidian 已打开 vault（示例：`D:\ObsBocdVault`）
 - [ ] Omnisearch 插件已安装并启用
 - [ ] HTTP server 已启用（端口 51361）
 - [ ] 测试搜索成功
+
+## Omnisearch 的能力范围
+
+Omnisearch HTTP 是四层基础搜索的第一层，覆盖以下场景：
+
+- **全文关键词搜索**：根据关键词查找匹配的笔记文件
+- **相关性排序**：BM25 权重，结果按相关度排序
+- **容错搜索**：支持拼写错误，智能匹配
+- **OCR 支持**：搜索图片中的文字（需配合 Text Extractor 插件）
+- **PDF 支持**：搜索 PDF 文档内容
+
+### Omnisearch 不能做什么
+
+以下查询类型**不在** Omnisearch HTTP 的能力范围内，需要官方 Obsidian CLI：
+
+| 查询类型 | Omnisearch | 官方 CLI |
+|----------|:----------:|:--------:|
+| 全文关键词搜索 | ✅ | ✅ |
+| 上下文搜索（关键词所在行） | 近似 | ✅ |
+| 容错/模糊搜索 | ✅ | ✅ |
+| 任务查询（待办/已完成） | ❌ | ✅ |
+| 标签查询（统计/详情） | ❌ | ✅ |
+| 属性查询（frontmatter） | ❌ | ✅ |
+| 反向链接查询 | ❌ | ✅ |
+| 出站链接查询 | ❌ | ✅ |
+| 目录文件列表 | ❌ | ✅ |
+| 文档大纲/标题层级 | ❌ | ✅ |
+| 读取笔记全文 | ❌ | ✅ |
+
+> 不要尝试用 Omnisearch HTTP 处理 tasks、tags、properties、backlinks、links、outline 等结构化查询。这些需要官方 Obsidian CLI。
 
 ## 故障排除
 
@@ -63,23 +93,16 @@ curl http://localhost:51361/search?q=欢迎
 2. 在 Omnisearch 设置中查看索引状态
 3. 可以尝试重新索引：在 Omnisearch 设置中找到 "Clear cache and re-index"
 
-## 安装后的优势
+## 与四层基础搜索的关系
 
-启用 Omnisearch HTTP 后，你将获得：
-
-1. **最快的搜索速度** - 比官方 CLI 和 obs CLI 都快
-2. **更好的容错性** - 支持拼写错误，智能匹配
-3. **OCR 支持** - 可以搜索图片中的文字（需配合 Text Extractor 插件）
-4. **PDF 支持** - 可以搜索 PDF 文档内容
-
-## 与三层搜索方案的集成
-
-安装完成后，智能搜索脚本会自动优先使用 Omnisearch HTTP：
+安装完成后，`smart-search.*` 脚本会自动优先使用 Omnisearch HTTP：
 
 ```
-搜索优先级：
-1. Omnisearch HTTP (最快) ✅
+四层基础搜索优先级：
+1. Omnisearch HTTP (最快) ← 你刚安装的
 2. 官方 CLI (功能全)
 3. obs CLI (独立运行)
-4. ripgrep (兜底)
+4. ripgrep / Select-String (兜底)
 ```
+
+这四层只覆盖基础全文搜索。任务、标签、属性、反链等高级查询需要直接调用官方 Obsidian CLI，不经过这个故障转移链。
