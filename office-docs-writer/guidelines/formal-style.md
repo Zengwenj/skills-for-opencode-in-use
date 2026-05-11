@@ -41,7 +41,6 @@
 |------|---------|--------|
 | 标题 | 固定值 | 40 磅 |
 | 正文 | 固定值 | 28 磅 |
-| 首行缩进 | — | 2 字符 |
 
 > 正文行距为 **28 磅**，非 30 磅。
 
@@ -119,10 +118,10 @@
 
 ## 段落规范
 
-- **首行缩进**：2 字符（必须使用 XML 属性 `w:firstLineChars`；禁止用厘米、磅值、twips 或其他物理长度近似，参见下方技术实现）
-- **标题缩进**：1-4级标题均需设置首行缩进2字符
-- **主标题缩进**：文档主标题由于要求居中对齐，**绝对禁止添加首行缩进**，以防止视觉失衡偏移。
-- **正文缩进**：首行缩进2字符
+- **文档主标题**：居中对齐，**绝对禁止**首行缩进；不得存在 `w:firstLineChars`、`w:firstLine` 或任何厘米、磅值、twips 等物理长度缩进
+- **1-4级标题**：设置首行缩进2字符（`w:firstLineChars="200"`）
+- **正文（非表格）**：设置首行缩进2字符（`w:firstLineChars="200"`）
+- **表格单元格内段落**：**不得设置首行缩进**；不得存在 `w:firstLineChars` 或 `w:firstLine`
 - **段落间距**：**段前0行，段后0行**（必须显式设置，不能为None）
 - 列举项可使用"一、二、三"或"（一）（二）（三）"层级编号
 - 避免使用 Markdown 格式符号（如 `#`、`**`、`-`）出现在最终文档输出中
@@ -139,6 +138,8 @@
 ## 字体颜色与字形
 
 - **颜色**：所有文字必须为纯黑色 **RGB(0, 0, 0)**
+- **Heading 主题色覆盖**：使用 Word 内置 `Heading 1/2/3/4` 或等效样式时，必须显式覆盖样式继承的蓝色/主题色为纯黑色 `RGB(0, 0, 0)`
+- **颜色 XML 要求**：不能只依赖样式默认值，必须清除 `w:themeColor`、`w:themeTint`、`w:themeShade`，并设置 `w:val="000000"`
 - **字形**：**常规**（非粗体、非斜体、无下划线）
 - **标题字形**：主标题、1-4级标题及正文均保持常规字形（除非用户特殊要求加粗）
 
@@ -165,6 +166,26 @@ def set_first_line_chars(paragraph, chars=2):
     ind.set(qn('w:firstLineChars'), str(int(chars * 100)))
     ind.attrib.pop(qn('w:firstLine'), None) # 移除多余的物理宽度参数
 
+def clear_first_line_indent(paragraph):
+    """清除不应缩进段落（主标题、表格单元格段落）的首行缩进 XML 属性"""
+    paragraph.paragraph_format.first_line_indent = None
+    pPr = paragraph._element.get_or_add_pPr()
+    ind = pPr.find(qn('w:ind'))
+    if ind is not None:
+        ind.attrib.pop(qn('w:firstLineChars'), None)
+        ind.attrib.pop(qn('w:firstLine'), None)
+
+def set_run_black(run):
+    """显式设置纯黑色，并清除 Heading 样式默认继承的主题色属性"""
+    run.font.color.rgb = RGBColor(0, 0, 0)
+    rPr = run._element.get_or_add_rPr()
+    color = rPr.find(qn('w:color'))
+    if color is not None:
+        color.set(qn('w:val'), '000000')
+        color.attrib.pop(qn('w:themeColor'), None)
+        color.attrib.pop(qn('w:themeTint'), None)
+        color.attrib.pop(qn('w:themeShade'), None)
+
 def set_run_font(run, cn_font_name, font_size, en_font_name='Times New Roman', bold=False, color=RGBColor(0,0,0)):
     """设置字体，区分中英文字体，并确保颜色为纯黑色，字形为常规"""
     run.font.name = en_font_name  # 控制西文与数字字体
@@ -172,6 +193,8 @@ def set_run_font(run, cn_font_name, font_size, en_font_name='Times New Roman', b
     run.font.size = Pt(font_size)
     run.font.bold = bold
     run.font.color.rgb = color  # 纯黑色 RGB(0,0,0)
+    if color == RGBColor(0, 0, 0):
+        set_run_black(run)      # 覆盖 Heading 样式继承的蓝色/主题色
     run.font.italic = False     # 确保不是斜体
     run.font.underline = False  # 确保无下划线
 
@@ -196,8 +219,17 @@ h1 = doc.add_paragraph()
 h1.style = doc.styles['Heading 1']  # 设置大纲级别1级
 h1_run = h1.add_run('一、工作概述')
 set_run_font(h1_run, '方正黑体_GBK', 16, en_font_name='Times New Roman', bold=False)
+set_run_black(h1_run)  # 使用 Heading 样式时必须显式覆盖主题蓝色为纯黑色
 set_paragraph_spacing(h1, space_before=0, space_after=0, line_spacing=40)
 set_first_line_chars(h1, 2)  # 首行缩进2字符
+
+# 文档主标题（居中，绝对禁止首行缩进）
+title = doc.add_paragraph()
+title.alignment = 1
+title_run = title.add_run('关于推进重点工作的通知')
+set_run_font(title_run, '方正小标宋_GBK', 22, en_font_name='Times New Roman')
+set_paragraph_spacing(title, space_before=0, space_after=0, line_spacing=40)
+clear_first_line_indent(title)
 
 # 正文段落（方正仿宋_GBK，三号，行距28磅，首行缩进2字符，段前段后0行）
 p1 = doc.add_paragraph()
@@ -205,6 +237,14 @@ p1_run = p1.add_run('为深入贯彻...')
 set_run_font(p1_run, '方正仿宋_GBK', 16, en_font_name='Times New Roman')
 set_paragraph_spacing(p1, space_before=0, space_after=0, line_spacing=28)
 set_first_line_chars(p1, 2)  # 首行缩进2字符
+
+# 表格单元格内段落（不得设置首行缩进）
+table = doc.add_table(rows=1, cols=1)
+cell_para = table.cell(0, 0).paragraphs[0]
+cell_run = cell_para.add_run('表格内容')
+set_run_font(cell_run, '方正仿宋_GBK', 16, en_font_name='Times New Roman')
+set_paragraph_spacing(cell_para, space_before=0, space_after=0, line_spacing=28)
+clear_first_line_indent(cell_para)
 ```
 
 ### 字号对应表
@@ -222,17 +262,21 @@ set_first_line_chars(p1, 2)  # 首行缩进2字符
 - ❌ 错误：设置 `w:firstLine='480'` 或任何 cm/twips 近似值 —— 这是物理长度，不是字符语义
 - ✅ 正确：只使用 `w:firstLineChars` XML属性（2字符 = `200`）—— Word会显示为"2字符"
 - **说明**：`w:firstLineChars` 与 `w:firstLine` 是不同的 OOXML 属性；当要求是“首行缩进 2字符”时，不能把字符单位降级为物理长度近似值。
+- **例外**：文档主标题、表格单元格内段落不得设置首行缩进，必须移除 `w:firstLineChars` 与 `w:firstLine`。
 
 **段落间距**：
 - ❌ 错误：`space_before = None` —— 表示继承样式，不是0行
 - ✅ 正确：`space_before = Pt(0)` —— 明确表示段前0行
 
 **字体颜色**：
-- ❌ 错误：不设置 color.rgb —— 可能继承主题颜色
+- ❌ 错误：不设置 color.rgb —— 将继承主题颜色
 - ✅ 正确：`run.font.color.rgb = RGBColor(0, 0, 0)` —— 纯黑色
+- ✅ Heading 样式正确做法：同时设置 `w:color w:val="000000"`，并清除 `w:themeColor`、`w:themeTint`、`w:themeShade`
 
 **DOCX 结果验收**：
 - ✅ 中文字体必须核对 `w:eastAsia`
-- ✅ 首行缩进必须核对 `w:firstLineChars="200"`
+- ✅ 1-4级标题和正文（非表格）首行缩进必须核对 `w:firstLineChars="200"`
+- ✅ 文档主标题和表格单元格内段落必须核对不存在 `w:firstLineChars` 与 `w:firstLine`
+- ✅ Heading 1/2/3/4 文字颜色必须核对 `w:val="000000"`，且不存在 `w:themeColor`、`w:themeTint`、`w:themeShade`
 - ✅ 标题层级必须核对 Heading 1/2/3/4 或等效 `w:outlineLvl`
 - ❌ 错误：只看视觉上像标题/像缩进，就认定 DOCX 已符合规范

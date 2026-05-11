@@ -20,7 +20,7 @@
 
 - [ ] 正文行距：28磅（固定值）
 - [ ] 标题行距：40磅（固定值）
-- [ ] 首行缩进：2字符（使用 XML w:firstLineChars 属性）
+- [ ] 正文非表格段落与1-4级标题首行缩进：2字符（使用 XML w:firstLineChars="200"）
 - [ ] 主标题字号：二号
 - [ ] 正文字号：三号
 
@@ -68,7 +68,9 @@
 
 ## 六、字体颜色与字形（重要）
 
-- [ ] **所有文字颜色：纯黑色 RGB(0, 0, 0)**
+- [ ] **所有文字颜色：纯黑色 RGB(0, 0, 0) / XML `w:val="000000"`**
+- [ ] 所有 run 必须显式落为纯黑色，不得保留或继承 `themeColor`
+- [ ] 使用 `Heading 1/2/3/4` 时不得继承 Word 内置 Heading 样式的蓝色主题色；必须覆盖为黑色或清除 `themeColor`
 - [ ] **字形：常规**（非斜体、无下划线）
 - [ ] 主标题、一级标题、二级标题、正文保持常规字形
 - [ ] 不得沿用“二级标题必须加粗”的旧规则
@@ -87,8 +89,10 @@
 
 - [ ] 编号层级一致（一级"一、"，二级"（一）"，三级"1."，四级"（1）"）
 - [ ] 列举项编号不混用
-- [ ] **所有标题均设置首行缩进2字符**
-- [ ] 正文段落设置首行缩进2字符
+- [ ] 文档主标题**不得设置首行缩进**
+- [ ] 1-4级标题设置首行缩进2字符（`w:firstLineChars="200"`）
+- [ ] 正文非表格段落设置首行缩进2字符（`w:firstLineChars="200"`）
+- [ ] 表格单元格内段落**不得设置首行缩进**
 
 ## 九、内容格式
 
@@ -107,13 +111,25 @@
 - ❌ 错误：`first_line_indent = Pt(24)` —— Word显示为"0.85cm"
 - ❌ 错误：`firstLineChars = '2'` —— 值不正确（应为'200'）
 - ❌ 错误：设置 `w:firstLine='480'`、`Cm(...)`、`Pt(...)` 或任何 cm/twips 近似值 —— 这不是“2字符”的合规表达
+- ❌ 错误：主标题套用标题缩进规则，存在 `w:firstLineChars` 或 `w:firstLine`
+- ❌ 错误：表格单元格段落套用正文首行缩进，存在 `w:firstLineChars` 或 `w:firstLine`
 - ✅ 正确：使用 XML `w:firstLineChars="200"` —— Word显示为"2字符"
+- ✅ 正确：主标题、表格单元格内段落不写入任何首行缩进属性
 - **技术实现**：
 ```python
+from docx import Document
+from docx.oxml import OxmlElement
+from docx.oxml.ns import qn
 from docx.shared import Pt
+
+doc = Document()
+paragraph = doc.add_paragraph()
 paragraph.paragraph_format.first_line_indent = Pt(1) # 占位，触发按正确顺序插入 w:ind
 pPr = paragraph._element.get_or_add_pPr()
 ind = pPr.find(qn('w:ind'))
+if ind is None:
+    ind = OxmlElement('w:ind')
+    pPr.append(ind)
 ind.set(qn('w:firstLineChars'), '200')
 ind.attrib.pop(qn('w:firstLine'), None) # 移除多余的物理宽度参数
 ```
@@ -125,11 +141,13 @@ ind.attrib.pop(qn('w:firstLine'), None) # 移除多余的物理宽度参数
 - ✅ 正确：`space_before = Pt(0)` —— 明确段前0行
 
 ### 3. 字体颜色
-- ❌ 错误：不设置 color.rgb —— 可能使用主题色
+- ❌ 错误：不设置 color.rgb —— 会使用主题色
+- ❌ 错误：Heading 2/3 只设置样式，不覆盖 Word 内置标题样式默认蓝色主题色
 - ✅ 正确：`run.font.color.rgb = RGBColor(0, 0, 0)` —— 纯黑色
+- ✅ 正确：清除或覆盖 `w:themeColor`，并确保 `w:color w:val="000000"`
 
 ### 4. 字形
-- ❌ 错误：不设置 italic/underline —— 可能继承样式
+- ❌ 错误：不设置 italic/underline —— 将继承样式
 - ✅ 正确：显式设置 `italic = False`, `underline = False`
 
 ### 5. 标题样式映射（关键）
@@ -140,6 +158,8 @@ ind.attrib.pop(qn('w:firstLine'), None) # 移除多余的物理宽度参数
 ### 6. XML 级验收（关键）
 - ✅ 检查 `w:eastAsia` 是否与目标中文字体一致
 - ✅ 检查 `w:firstLineChars="200"` 是否存在于应缩进段落
+- ✅ 检查主标题段落不得存在 `w:firstLineChars` / `w:firstLine`
+- ✅ 检查表格单元格段落不得存在 `w:firstLineChars` / `w:firstLine`
 - ✅ 检查标题段是否带有正确 `w:pStyle` 或等效 `w:outlineLvl`
 
 ## 十二、结构性校验（带版记/带表格文档）
