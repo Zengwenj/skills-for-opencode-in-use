@@ -1,13 +1,13 @@
 #!/bin/bash
 #
-# Obsidian 三层混合智能搜索脚本
+# Obsidian 四层基础搜索故障转移脚本
 # 自动选择最佳可用搜索方案
 #
 
 set -e
 
 # 配置
-VAULT_PATH="${OBSIDIAN_VAULT:-D:ObsBocdVault}"
+VAULT_PATH="${OBSIDIAN_VAULT:-D:\ObsBocdVault}"
 OMNISEARCH_PORT="${OMNISEARCH_PORT:-51361}"
 TIMEOUT="${SEARCH_TIMEOUT:-3}"
 LIMIT="${2:-10}"

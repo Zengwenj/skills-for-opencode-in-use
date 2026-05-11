@@ -1,5 +1,5 @@
 # Obsidian 统一搜索 - Windows PowerShell 版本
-# 三层混合智能搜索方案
+# 四层基础搜索故障转移方案
 
 param(
     [Parameter(Mandatory=$true)]
