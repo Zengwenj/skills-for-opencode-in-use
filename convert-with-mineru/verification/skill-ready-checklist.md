@@ -2,14 +2,20 @@
 
 - [x] `SKILL.md` 只有 `name` / `description` 两个 frontmatter 字段
 - [x] `description` 只描述触发条件，不描述工作流
-- [x] 轻量模式规则写清楚：单文件、Markdown-only
+- [x] Canonical route 枚举写清楚：`mineru` / `mineru_html` / `multimodal_looker` / `unsupported` / `invalid_input`
 - [x] 精准模式规则写清楚：批量、目录、JSON 默认走这里
-- [x] MineU 支持矩阵与 fallback 规则写清楚
-- [x] 中文手写扫描件策略写清楚
+- [x] MinerU 官方支持格式矩阵写清楚（含 xls/xlsx/图片/html）
+- [x] `csv/tsv/json/xml/epub/zip` 明确 unsupported，不委托其他 skill
+- [x] `markdown-converter` 已移除，无残留引用
+- [x] 中文手写/低质扫描件策略写清楚（`--prefer-multimodal`，guidance-only）
 - [x] 输出命名规则写清楚
 - [x] 配置与示例文件不含真实 token
-- [x] 已写清楚“技能 contract”与 MinerU 官方原生产物不是同一层概念
+- [x] 已写清楚"技能 contract"与 MinerU 官方原生产物不是同一层概念
 - [x] `mineru..env` 这类本地真实配置已按隔离对象处理，不进入示例、引用和分发链路
-- [x] 单元测试通过
+- [x] 质量门控阈值与行为写清楚（empty / repetition / garbled / image / json / coverage）
+- [x] `--require-json` 语义写清楚
+- [x] `KEEP_RAW_TREE` 行为写清楚（Case A/B/C）
+- [x] HTML/HTM 路由与 `model_version="MinerU-HTML"` 调用契约写清楚
+- [x] 单元测试通过（`pytest` 102 tests）
 - [x] 过滤副本不包含 `.venv/`、`.pytest_cache/`、`live-repeat-output/`、`HANDOFF-2026-04-01.md`、`mineru..env`
 - [x] 压力场景复核完成
