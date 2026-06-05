@@ -1,36 +1,39 @@
-# Fallback Routing
+# Routing Matrix
 
-## MineU 主路径优先级
+## Canonical Routes (Phase 1)
 
-优先把 MineU 当成这些场景的主路径：
-- 本地 `.docx` / 数字导出 PDF / 非扫描类 Office
-- 需要 Markdown
-- 需要结构化 JSON
-- 需要目录批量
+本 skill 的确定性路由返回以下五个值之一：
 
-## 类型与限制分流
+| Route | 含义 |
+| --- | --- |
+| `mineru` | MinerU 精准模式处理 |
+| `mineru_html` | MinerU HTML 模型（`model_version="MinerU-HTML"`） |
+| `multimodal_looker` | 多模态 OCR/vision guidance（Phase 1 仅输出 guidance，不真实调用） |
+| `unsupported` | 明确不支持的格式 |
+| `invalid_input` | 文件不存在、不可读或 0-byte |
 
-| 输入类型/情况 | 推荐路径 | 说明 |
+## 路由决策
+
+| 输入类型 | Route | 说明 |
 | --- | --- | --- |
-| 数字导出 `pdf` / `docx` | MineU | 稳定主路径 |
-| 扫描 `pdf` / `png` / `jpg` / `jpeg` | `multimodal-looker` | 不再默认进 MineU |
-| `doc/ppt/pptx` | MineU | 继续维持现有 MineU 路径 |
-| `xls/xlsx` | fallback（`xlsx` 技能或 `markdown-converter`） | 精准 API 不支持 Excel |
-| `html/htm` | MineU 精准模式 | 精准 API 支持 HTML |
-| `csv/tsv/json/xml/epub/zip` | `markdown-converter` | 不必强绑 MineU |
-| 文件超页数/超大小限制 | fallback | 不要强压 MineU |
-| MineU 输出重复灌词 | 已安装时切 `multimodal-looker` | 说明 OCR 结果不可信 |
+| `.pdf` | `mineru` | 所有 PDF 统一走 MinerU |
+| `.doc` `.docx` `.ppt` `.pptx` | `mineru` | Office 文档 |
+| `.xls` `.xlsx` | `mineru` | 官方 API 已支持 Excel |
+| `.html` `.htm` | `mineru_html` | 使用 MinerU-HTML 模型 |
+| `.png` `.jpg` `.jpeg` `.jp2` `.webp` `.gif` `.bmp` | `mineru` | 图片 OCR |
+| `.csv` `.tsv` `.json` `.xml` `.epub` `.zip` | `unsupported` | 明确不支持 |
+| 未知扩展名 | `unsupported` | 不委托其他 skill |
+| 不存在 / 不可读 / 0-byte | `invalid_input` | 官方支持格式但无法读取 |
 
-## fallback 推荐顺序
+## `--prefer-multimodal` 行为
 
-1. 通用文档兜底：`markdown-converter`
-2. 类型专门化：`pdf` / `docx` / `pptx` / `xlsx`
-3. 扫描件 / 图像转写：已安装时使用 `multimodal-looker`
+当传入 `--prefer-multimodal` 时，PDF 和官方图片格式路由到 `multimodal_looker`（guidance-only）。Phase 1 不真实调用多模态 OCR/vision 工具，仅在输出中提供 guidance。
+
+guidance-only 路径不产生转换产物，因此整体 exit 2。
 
 ## 分流准则
 
-- MineU 能做且质量可信：继续 MineU
-- MineU 不能做：立即切 fallback
-- 扫描 PDF 和图片：默认不进 MineU，直接切 `multimodal-looker`
-- MineU 能做但结果不可信：立即切 `multimodal-looker`
-- fallback 产物也沿用源文件名规则，但不要伪装成 MineU JSON
+- 官方支持格式 → `mineru` 或 `mineru_html`
+- 明确不支持的格式 → `unsupported`，不委托其他 skill
+- 文件无法读取 → `invalid_input`
+- 质量门控失败后 → 输出结构化 guidance（source、gate、reason、suggested route），不自动调用多模态工具
