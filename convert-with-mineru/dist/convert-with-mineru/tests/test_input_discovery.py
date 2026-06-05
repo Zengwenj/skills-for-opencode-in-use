@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from scripts.mineru_inputs import discover_inputs, split_supported_and_fallback
+from scripts.mineru_inputs import discover_inputs
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -56,15 +56,15 @@ def test_discover_inputs_skips_existing_mineru_output_trees(tmp_path: Path):
     assert [path.name for path in discovered] == ["report.pdf"]
 
 
-def test_split_supported_and_fallback(tmp_path: Path):
+def test_discover_inputs_includes_known_extensions(tmp_path: Path):
     pdf = tmp_path / "a.pdf"
     csv = tmp_path / "b.csv"
     pdf.write_text("x", encoding="utf-8")
     csv.write_text("x", encoding="utf-8")
 
-    supported, fallback = split_supported_and_fallback([pdf, csv])
-    assert supported == [pdf]
-    assert fallback == [csv]
+    discovered = discover_inputs([tmp_path], recursive=False)
+    assert pdf in discovered
+    assert csv in discovered
 
 
 def test_skill_markdown_has_no_utf8_bom():

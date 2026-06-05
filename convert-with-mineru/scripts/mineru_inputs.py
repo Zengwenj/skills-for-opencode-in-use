@@ -3,34 +3,38 @@ from __future__ import annotations
 from pathlib import Path
 
 
-MINEU_EXTENSIONS = {
+MINERU_EXTENSIONS = {
     ".pdf",
     ".doc",
     ".docx",
     ".ppt",
     ".pptx",
+    ".xls",
+    ".xlsx",
     ".htm",
     ".html",
+    ".png",
+    ".jpg",
+    ".jpeg",
+    ".jp2",
+    ".webp",
+    ".gif",
+    ".bmp",
 }
 
-# Excel 不被 MineU precision API 支持，路由到 fallback
-EXCEL_EXTENSIONS = {".xls", ".xlsx"}
-
-FALLBACK_EXTENSIONS = {
+UNSUPPORTED_EXTENSIONS = {
     ".csv",
     ".tsv",
     ".json",
     ".xml",
     ".epub",
     ".zip",
-} | EXCEL_EXTENSIONS
-
-MULTIMODAL_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+}
 
 PDF_TEXT_MARKERS = (b"/Font", b"BT", b"Tj", b"TJ", b"Tf", b"/ToUnicode")
 PDF_IMAGE_MARKERS = (b"/Subtype /Image", b"/Image", b"/XObject", b" Do")
 
-KNOWN_EXTENSIONS = MINEU_EXTENSIONS | FALLBACK_EXTENSIONS | MULTIMODAL_EXTENSIONS
+KNOWN_EXTENSIONS = MINERU_EXTENSIONS | UNSUPPORTED_EXTENSIONS
 OUTPUT_DIRECTORY_SUFFIXES = {".images", ".json", ".raw"}
 
 
@@ -73,12 +77,6 @@ def discover_inputs(
     return sorted(discovered, key=lambda value: str(value).lower())
 
 
-def split_supported_and_fallback(paths: list[Path]) -> tuple[list[Path], list[Path]]:
-    supported = [path for path in paths if path.suffix.lower() in MINEU_EXTENSIONS]
-    fallback = [path for path in paths if path.suffix.lower() in FALLBACK_EXTENSIONS]
-    return supported, fallback
-
-
 def is_probably_digital_pdf(path: Path, sniff_bytes: int = 512_000) -> bool:
     if path.suffix.lower() != ".pdf":
         return False
@@ -98,21 +96,38 @@ def is_probably_digital_pdf(path: Path, sniff_bytes: int = 512_000) -> bool:
     return False
 
 
-def route_file(path: Path) -> str:
+def route_file(path: Path, prefer_multimodal: bool = False) -> str:
     suffix = path.suffix.lower()
-    if suffix in FALLBACK_EXTENSIONS:
-        return "fallback"
-    if suffix in MULTIMODAL_EXTENSIONS:
+
+    if suffix in UNSUPPORTED_EXTENSIONS:
+        return "unsupported"
+
+    if suffix not in MINERU_EXTENSIONS:
+        return "unsupported"
+
+    if not path.exists() or not path.is_file():
+        return "invalid_input"
+
+    try:
+        if path.stat().st_size == 0:
+            return "invalid_input"
+    except OSError:
+        return "invalid_input"
+
+    if suffix in {".htm", ".html"}:
+        return "mineru_html"
+
+    if prefer_multimodal and suffix in {".pdf", ".png", ".jpg", ".jpeg", ".jp2", ".webp", ".gif", ".bmp"}:
         return "multimodal_looker"
-    if suffix == ".pdf":
-        return "mineu" if is_probably_digital_pdf(path) else "multimodal_looker"
-    if suffix in MINEU_EXTENSIONS:
-        return "mineu"
-    return "fallback"
+
+    return "mineru"
 
 
-def split_routed_inputs(paths: list[Path]) -> dict[str, list[Path]]:
-    routed = {"mineu": [], "multimodal_looker": [], "fallback": []}
+def split_routed_inputs(
+    paths: list[Path], prefer_multimodal: bool = False
+) -> dict[str, list[Path]]:
+    routed: dict[str, list[Path]] = {}
     for path in paths:
-        routed[route_file(path)].append(path)
+        route = route_file(path, prefer_multimodal=prefer_multimodal)
+        routed.setdefault(route, []).append(path)
     return routed
