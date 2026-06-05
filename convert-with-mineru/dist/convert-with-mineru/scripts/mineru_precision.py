@@ -1,7 +1,8 @@
 from __future__ import annotations
 
-import json
 import importlib
+import inspect
+import json
 import os
 import shutil
 import subprocess
@@ -115,6 +116,7 @@ def persist_precision_result(
     output_root: Path,
     keep_raw_tree: bool = False,
     used_stems: set[str] | None = None,
+    relative_root: Path | None = None,
 ) -> OutputTargets:
     include_json = True
     targets = build_output_targets(
@@ -123,6 +125,7 @@ def persist_precision_result(
         include_json=include_json,
         keep_raw_tree=keep_raw_tree,
         used_stems=used_stems,
+        relative_root=relative_root,
     )
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -143,11 +146,29 @@ def persist_precision_result(
     return targets
 
 
+HTML_EXTENSIONS = {".html", ".htm"}
+
+_MINERU_HTML_MODEL = "MinerU-HTML"
+
+
+def _extract_one(client, source: Path):
+    if source.suffix.lower() in HTML_EXTENSIONS:
+        sig = inspect.signature(client.extract)
+        if "model_version" not in sig.parameters:
+            raise TypeError(
+                f"SDK extract() does not accept 'model_version'; "
+                f"cannot handle {source.name} as HTML"
+            )
+        return client.extract(str(source), model_version=_MINERU_HTML_MODEL)
+    return client.extract(str(source))
+
+
 def convert_files(
     sources: list[Path],
     output_root: Path,
     token: str,
     keep_raw_tree: bool = False,
+    relative_root: Path | None = None,
 ) -> list[OutputTargets]:
     if not token:
         raise ValueError("precision mode requires MINERU_TOKEN")
@@ -159,7 +180,7 @@ def convert_files(
 
     with MinerUClient(token) as client:
         for source in sources:
-            result = client.extract(str(source))
+            result = _extract_one(client, source)
             rendered.append(
                 persist_precision_result(
                     source,
@@ -167,6 +188,7 @@ def convert_files(
                     output_root,
                     keep_raw_tree=keep_raw_tree,
                     used_stems=used_stems,
+                    relative_root=relative_root,
                 )
             )
     return rendered

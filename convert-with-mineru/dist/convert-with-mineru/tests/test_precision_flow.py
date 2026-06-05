@@ -1,6 +1,9 @@
+import inspect
 import io
 import zipfile
 from pathlib import Path
+
+import pytest
 
 from scripts.mineru_precision import convert_files, persist_precision_result
 
@@ -188,7 +191,7 @@ class FakeMinerU:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def extract(self, source: str):
+    def extract(self, source: str, model_version: str | None = None):
         name = Path(source).stem
         result = FakeResult()
         result.markdown = f"# {name}\n\n![](images/img1.png)\n"
@@ -243,10 +246,10 @@ def test_convert_files_passes_keep_raw_tree_setting_to_persist(
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def extract(self, source: str):
+        def extract(self, source: str, model_version: str | None = None):
             return FakeResult()
 
-    def fake_persist(source, result, output_root, keep_raw_tree=False, used_stems=None):
+    def fake_persist(source, result, output_root, keep_raw_tree=False, used_stems=None, relative_root=None):
         calls.append(keep_raw_tree)
         return persist_precision_result(
             source,
@@ -254,6 +257,7 @@ def test_convert_files_passes_keep_raw_tree_setting_to_persist(
             output_root,
             keep_raw_tree=keep_raw_tree,
             used_stems=used_stems,
+            relative_root=relative_root,
         )
 
     monkeypatch.setattr(precision, "MinerUClient", FakeClient)
@@ -265,3 +269,108 @@ def test_convert_files_passes_keep_raw_tree_setting_to_persist(
     convert_files([source], tmp_path / "out", token="token", keep_raw_tree=True)
 
     assert calls == [True]
+
+
+class RecordingMinerU:
+    def __init__(self, token: str):
+        self.token = token
+        self.calls: list[dict] = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def extract(self, source: str, model_version: str | None = None):
+        call = {"source": source}
+        if model_version is not None:
+            call["model_version"] = model_version
+        self.calls.append(call)
+        name = Path(source).stem
+        result = FakeResult()
+        result.markdown = f"# {name}\n\n![](images/img1.png)\n"
+        result.content_list = [{"name": name}]
+        return result
+
+
+def test_convert_files_html_receives_model_version(monkeypatch, tmp_path: Path):
+    import scripts.mineru_precision as precision
+
+    client = RecordingMinerU("token")
+    monkeypatch.setattr(precision, "MinerUClient", lambda t: client)
+
+    html = tmp_path / "page.html"
+    html.write_text("<html><body>hello</body></html>", encoding="utf-8")
+
+    convert_files([html], tmp_path / "out", token="token")
+
+    assert len(client.calls) == 1
+    assert client.calls[0]["model_version"] == "MinerU-HTML"
+
+
+def test_convert_files_pdf_no_model_version(monkeypatch, tmp_path: Path):
+    import scripts.mineru_precision as precision
+
+    client = RecordingMinerU("token")
+    monkeypatch.setattr(precision, "MinerUClient", lambda t: client)
+
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF")
+
+    convert_files([pdf], tmp_path / "out", token="token")
+
+    assert len(client.calls) == 1
+    assert "model_version" not in client.calls[0]
+
+
+def test_convert_files_mixed_html_and_pdf(monkeypatch, tmp_path: Path):
+    import scripts.mineru_precision as precision
+
+    client = RecordingMinerU("token")
+    monkeypatch.setattr(precision, "MinerUClient", lambda t: client)
+
+    html = tmp_path / "page.html"
+    html.write_text("<html><body>hello</body></html>", encoding="utf-8")
+    pdf = tmp_path / "doc.pdf"
+    pdf.write_bytes(b"%PDF")
+
+    convert_files([html, pdf], tmp_path / "out", token="token")
+
+    assert len(client.calls) == 2
+    html_call = next(c for c in client.calls if c["source"].endswith("page.html"))
+    pdf_call = next(c for c in client.calls if c["source"].endswith("doc.pdf"))
+    assert html_call["model_version"] == "MinerU-HTML"
+    assert "model_version" not in pdf_call
+
+
+class ExtractWithoutModelVersion:
+    def __init__(self, token: str):
+        self.token = token
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def extract(self, source: str):
+        name = Path(source).stem
+        result = FakeResult()
+        result.markdown = f"# {name}\n\n"
+        result.content_list = [{"name": name}]
+        return result
+
+
+def test_convert_files_html_raises_when_sdk_lacks_model_version(
+    monkeypatch, tmp_path: Path
+):
+    import scripts.mineru_precision as precision
+
+    monkeypatch.setattr(precision, "MinerUClient", ExtractWithoutModelVersion)
+
+    html = tmp_path / "page.html"
+    html.write_text("<html><body>hello</body></html>", encoding="utf-8")
+
+    with pytest.raises(TypeError, match="model_version"):
+        convert_files([html], tmp_path / "out", token="token")
