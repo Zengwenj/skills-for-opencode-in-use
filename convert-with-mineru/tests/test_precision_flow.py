@@ -1,10 +1,12 @@
 import inspect
 import io
+import json
 import zipfile
 from pathlib import Path
 
 import pytest
 
+from scripts.mineru_manifest import PER_FILE_MANIFEST_FIELDS
 from scripts.mineru_precision import convert_files, persist_precision_result
 
 
@@ -13,6 +15,7 @@ class FakeResult:
         self.markdown = "# ok\n\n![](images/img1.png)\n"
         self.content_list = [{"type": "text", "text": "hello"}]
         self._zip_bytes = self._make_zip_bytes()
+        self.save_all_calls: list[Path] = []
 
     def save_markdown(self, path: str, with_images: bool = True):
         target = Path(path)
@@ -26,6 +29,7 @@ class FakeResult:
 
     def save_all(self, directory: str):
         target = Path(directory)
+        self.save_all_calls.append(target)
         target.mkdir(parents=True, exist_ok=True)
         with zipfile.ZipFile(io.BytesIO(self._zip_bytes)) as zf:
             zf.extractall(target)
@@ -38,11 +42,29 @@ class FakeResult:
             zf.writestr("full.md", "# ok\n\n![](images/img1.png)\n")
             zf.writestr("report_content_list.json", '[{"type":"text","text":"hello"}]')
             zf.writestr("report_content_list_v2.json", '{"version": 2}')
-            zf.writestr("report_model.json", '{"pages": 1}')
+            zf.writestr("model.json", '{"pages": 1}')
             zf.writestr("layout.json", '{"blocks": []}')
             zf.writestr("report_origin.pdf", b"pdf")
             zf.writestr("images/img1.png", b"png")
         return buffer.getvalue()
+
+
+class FakeResultWithoutImages(FakeResult):
+    def save_markdown(self, path: str, with_images: bool = True):
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(self.markdown, encoding="utf-8")
+        return target
+
+
+class FakeResultWithEmptyImages(FakeResult):
+    def save_markdown(self, path: str, with_images: bool = True):
+        target = Path(path)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_text(self.markdown, encoding="utf-8")
+        if with_images:
+            (target.parent / "images").mkdir(exist_ok=True)
+        return target
 
 
 def test_persist_precision_result_writes_source_named_outputs(tmp_path: Path):
@@ -68,6 +90,123 @@ def test_persist_precision_result_writes_source_named_outputs(tmp_path: Path):
     )
     assert (targets.images_dir / "img1.png").read_bytes() == b"png"
     assert (tmp_path / "out" / "report.raw").exists() is False
+    assert targets.manifest.exists() is False
+
+
+def test_persist_precision_result_writes_manifest_and_archives_raw_stage(
+    tmp_path: Path,
+):
+    source = tmp_path / "report.pdf"
+    result = FakeResult()
+    audit_dir = tmp_path / "_review"
+
+    targets = persist_precision_result(
+        source,
+        result,
+        tmp_path / "out",
+        audit_dir=audit_dir,
+        batch_id="fixed",
+    )
+
+    assert targets.manifest.exists()
+    manifest = json.loads(targets.manifest.read_text(encoding="utf-8"))
+    assert set(PER_FILE_MANIFEST_FIELDS).issubset(manifest.keys())
+    assert manifest["batch_id"] == "fixed"
+    assert manifest["allocated_stem"] == "report"
+    assert manifest["route"] == "mineru"
+    assert manifest["model"] == "default"
+    assert manifest["conversion_status"] == "success"
+    assert manifest["quality_gate"] == {
+        "status": "not_run",
+        "passed": None,
+        "failed_gates": [],
+    }
+    assert manifest["raw_archive_status"] == "archived"
+    assert manifest["image_status"] == "ok"
+    assert manifest["image_count"] == 1
+
+    for field in (
+        "output_md",
+        "output_json_dir",
+        "output_images_dir",
+        "per_file_manifest",
+        "raw_archive_path",
+    ):
+        assert manifest[field]
+        assert "\\" not in manifest[field]
+
+    assert manifest["per_file_manifest"] == str(targets.manifest).replace("\\", "/")
+
+    raw_archive = Path(manifest["raw_archive_path"])
+    assert raw_archive.exists()
+    assert raw_archive == audit_dir / "raw" / "report"
+    assert (raw_archive / "full.md").exists()
+    assert (raw_archive / "layout.json").exists()
+    assert (raw_archive / "model.json").exists()
+    assert (raw_archive / "images" / "img1.png").read_bytes() == b"png"
+    assert (raw_archive / "report_origin.pdf").read_bytes() == b"pdf"
+
+    assert targets.json_dir is not None
+    assert {path.name for path in targets.json_dir.iterdir()} == {
+        "report.content_list.json",
+        "report.content_list_v2.json",
+        "report.layout.json",
+        "report.model.json",
+    }
+    assert (tmp_path / "out" / "report.raw").exists() is False
+
+    save_all_by_name = {path.name: path for path in result.save_all_calls}
+    assert {"json", "raw"}.issubset(save_all_by_name)
+    assert save_all_by_name["raw"].parent == save_all_by_name["json"].parent
+
+
+def test_persist_precision_result_skips_manifest_and_raw_archive_without_audit_dir(
+    tmp_path: Path,
+):
+    source = tmp_path / "report.pdf"
+    result = FakeResult()
+
+    targets = persist_precision_result(source, result, tmp_path / "out")
+
+    assert targets.manifest.exists() is False
+    assert (tmp_path / "_review").exists() is False
+    assert [path.name for path in result.save_all_calls] == ["json"]
+
+
+def test_persist_precision_result_manifest_records_no_images_produced(
+    tmp_path: Path,
+):
+    source = tmp_path / "report.pdf"
+
+    targets = persist_precision_result(
+        source,
+        FakeResultWithoutImages(),
+        tmp_path / "out",
+        audit_dir=tmp_path / "_review",
+        batch_id="fixed",
+    )
+
+    manifest = json.loads(targets.manifest.read_text(encoding="utf-8"))
+    assert manifest["conversion_status"] == "success"
+    assert manifest["image_status"] == "none_produced"
+    assert manifest["image_count"] == 0
+
+
+def test_persist_precision_result_manifest_records_empty_images_dir(tmp_path: Path):
+    source = tmp_path / "report.pdf"
+
+    targets = persist_precision_result(
+        source,
+        FakeResultWithEmptyImages(),
+        tmp_path / "out",
+        audit_dir=tmp_path / "_review",
+        batch_id="fixed",
+    )
+
+    manifest = json.loads(targets.manifest.read_text(encoding="utf-8"))
+    assert manifest["conversion_status"] == "success"
+    assert manifest["image_status"] == "empty"
+    assert manifest["image_count"] == 0
 
 
 def test_persist_precision_result_keeps_content_list_in_source_json(tmp_path: Path):
@@ -267,7 +406,7 @@ class FakeMinerU:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def extract(self, source: str, model_version: str | None = None):
+    def extract(self, source: str, *, model: str | None = None):
         name = Path(source).stem
         result = FakeResult()
         result.markdown = f"# {name}\n\n![](images/img1.png)\n"
@@ -322,7 +461,7 @@ def test_convert_files_passes_keep_raw_tree_setting_to_persist(
         def __exit__(self, exc_type, exc, tb):
             return False
 
-        def extract(self, source: str, model_version: str | None = None):
+        def extract(self, source: str, *, model: str | None = None):
             return FakeResult()
 
     def fake_persist(source, result, output_root, keep_raw_tree=False, used_stems=None, relative_root=None):
@@ -358,10 +497,12 @@ class RecordingMinerU:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def extract(self, source: str, model_version: str | None = None):
+    def extract(self, source: str, *, model: str | None = None, **kwargs):
+        if "model_version" in kwargs:
+            raise AssertionError("model_version must not be passed to SDK extract")
         call = {"source": source}
-        if model_version is not None:
-            call["model_version"] = model_version
+        if model is not None:
+            call["model"] = model
         self.calls.append(call)
         name = Path(source).stem
         result = FakeResult()
@@ -370,7 +511,7 @@ class RecordingMinerU:
         return result
 
 
-def test_convert_files_html_receives_model_version(monkeypatch, tmp_path: Path):
+def test_convert_files_html_receives_html_model(monkeypatch, tmp_path: Path):
     import scripts.mineru_precision as precision
 
     client = RecordingMinerU("token")
@@ -382,7 +523,8 @@ def test_convert_files_html_receives_model_version(monkeypatch, tmp_path: Path):
     convert_files([html], tmp_path / "out", token="token")
 
     assert len(client.calls) == 1
-    assert client.calls[0]["model_version"] == "MinerU-HTML"
+    assert client.calls[0]["model"] == "html"
+    assert "model_version" not in client.calls[0]
 
 
 def test_convert_files_pdf_no_model_version(monkeypatch, tmp_path: Path):
@@ -398,6 +540,7 @@ def test_convert_files_pdf_no_model_version(monkeypatch, tmp_path: Path):
 
     assert len(client.calls) == 1
     assert "model_version" not in client.calls[0]
+    assert "model" not in client.calls[0]
 
 
 def test_convert_files_mixed_html_and_pdf(monkeypatch, tmp_path: Path):
@@ -416,11 +559,13 @@ def test_convert_files_mixed_html_and_pdf(monkeypatch, tmp_path: Path):
     assert len(client.calls) == 2
     html_call = next(c for c in client.calls if c["source"].endswith("page.html"))
     pdf_call = next(c for c in client.calls if c["source"].endswith("doc.pdf"))
-    assert html_call["model_version"] == "MinerU-HTML"
+    assert html_call["model"] == "html"
+    assert "model_version" not in html_call
     assert "model_version" not in pdf_call
+    assert "model" not in pdf_call
 
 
-class ExtractWithoutModelVersion:
+class ExtractWithModelOnly:
     def __init__(self, token: str):
         self.token = token
 
@@ -430,7 +575,8 @@ class ExtractWithoutModelVersion:
     def __exit__(self, exc_type, exc, tb):
         return False
 
-    def extract(self, source: str):
+    def extract(self, source: str, *, model: str | None = None, timeout: int = 300):
+        assert model == "html"
         name = Path(source).stem
         result = FakeResult()
         result.markdown = f"# {name}\n\n"
@@ -438,15 +584,16 @@ class ExtractWithoutModelVersion:
         return result
 
 
-def test_convert_files_html_raises_when_sdk_lacks_model_version(
+def test_convert_files_html_uses_sdk_model_keyword_when_model_version_is_absent(
     monkeypatch, tmp_path: Path
 ):
     import scripts.mineru_precision as precision
 
-    monkeypatch.setattr(precision, "MinerUClient", ExtractWithoutModelVersion)
+    monkeypatch.setattr(precision, "MinerUClient", ExtractWithModelOnly)
 
     html = tmp_path / "page.html"
     html.write_text("<html><body>hello</body></html>", encoding="utf-8")
 
-    with pytest.raises(TypeError, match="model_version"):
-        convert_files([html], tmp_path / "out", token="token")
+    rendered = convert_files([html], tmp_path / "out", token="token")
+
+    assert rendered[0].markdown.read_text(encoding="utf-8") == "# page\n\n"
