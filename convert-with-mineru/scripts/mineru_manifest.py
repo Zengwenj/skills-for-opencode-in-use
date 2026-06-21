@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import json
 import os
+import shutil
 import tempfile
 from collections.abc import Mapping
 from pathlib import Path
@@ -20,6 +21,8 @@ RAW_STATUS_ARCHIVED = "archived"
 RAW_STATUS_SKIPPED = "skipped"
 RAW_STATUS_FAILED = "failed"
 RAW_STATUS_PATH_TOO_LONG = "path_too_long"
+
+IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".jp2", ".webp", ".gif", ".bmp"}
 
 CONVERSION_STATUSES = {"success", "failed", "skipped"}
 
@@ -206,3 +209,54 @@ def build_manifest_entry(
         entry[field] = to_posix(entry[field])
 
     return entry
+
+
+def detect_image_status(staging_images_dir: Path | None) -> tuple[str, int]:
+    if staging_images_dir is None or not staging_images_dir.exists():
+        print("warning: no images directory produced")
+        return (IMAGE_STATUS_NONE_PRODUCED, 0)
+
+    image_count = sum(
+        1
+        for path in staging_images_dir.rglob("*")
+        if path.is_file() and path.suffix.lower() in IMAGE_EXTENSIONS
+    )
+    if image_count == 0:
+        print("warning: images directory contains no image files")
+        return (IMAGE_STATUS_EMPTY, 0)
+    return (IMAGE_STATUS_OK, image_count)
+
+
+def copy_images_with_status(src: Path, dst: Path) -> tuple[str, int]:
+    if not src.exists():
+        return (IMAGE_STATUS_NONE_PRODUCED, 0)
+
+    try:
+        if dst.exists():
+            shutil.rmtree(dst)
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(src, dst)
+    except (OSError, PermissionError):
+        return (IMAGE_STATUS_FAILED, 0)
+
+    return detect_image_status(dst)
+
+
+def archive_raw_tree(src: Path, dst: Path) -> tuple[str, str | None]:
+    if not src.exists():
+        print(f"warning: raw archive source does not exist: {to_posix(src)}")
+        return (RAW_STATUS_SKIPPED, None)
+
+    if os.name == "nt" and len(str(dst)) > 260:
+        print(f"warning: raw archive path too long: {to_posix(dst)}")
+        return (RAW_STATUS_PATH_TOO_LONG, None)
+
+    try:
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+    except (OSError, PermissionError):
+        return (RAW_STATUS_FAILED, None)
+
+    return (RAW_STATUS_ARCHIVED, to_posix(dst))
