@@ -1,0 +1,18 @@
+usage: mineru_convert.py [-h] [--recursive] [--require-json]
+                         [--output-root OUTPUT_ROOT] [--config CONFIG]
+                         [--prefer-multimodal] [--audit-dir AUDIT_DIR]
+                         inputs [inputs ...]
+
+Convert local files with MinerU.
+
+positional arguments:
+  inputs                Input files or directories
+
+options:
+  -h, --help            show this help message and exit
+  --recursive
+  --require-json
+  --output-root OUTPUT_ROOT
+  --config CONFIG
+  --prefer-multimodal
+  --audit-dir AUDIT_DIR

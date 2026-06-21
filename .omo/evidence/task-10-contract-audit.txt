@@ -1,0 +1,44 @@
+Task 10 contract audit evidence
+Working directory: C:\SkillsSetup\convert-with-mineru
+.omo excluded: yes; searches are scoped to scripts\*.py, SKILL.md, references\*.md under convert-with-mineru only.
+
+Step 2 distribution staging evidence:
+Command: .venv\Scripts\python.exe -m scripts.stage_distribution ".\dist\convert-with-mineru"
+Observed output: C:\SkillsSetup\convert-with-mineru\dist\convert-with-mineru
+Dist path exists: True
+Post-staging pytest command: .venv\Scripts\python.exe -m pytest --tb=short
+Observed result: 174 passed in 2.23s
+
+Check 1: No CSV manifest feature promise
+Command: Select-String -Path "scripts\*.py","SKILL.md","references\*.md" -Pattern "manifest\.csv" -SimpleMatch
+Result: NO MATCHES
+
+Check 1b: Robust literal mineru_manifest.csv search
+Command: Select-String -Path "scripts\*.py","SKILL.md","references\*.md" -Pattern "mineru_manifest.csv" -SimpleMatch
+Result: NO MATCHES
+
+Check 2: No formal source.raw/ in output contract
+Command: Select-String -Path "scripts\*.py","SKILL.md" -Pattern "source.raw" -SimpleMatch
+C:\SkillsSetup\convert-with-mineru\SKILL.md:115: - 正式输出目录不暴露 `source.raw/`；完整 MinerU raw 输出归档到外部审计目录 `_review/mineru/<batch_id>/raw/`，由批量 `mineru_manifest.json` 索引
+
+Check 3: No model_version in production code
+Command: Select-String -Path "scripts\*.py" -Pattern "model_version" -SimpleMatch
+Result: NO MATCHES
+
+
+CLI help audit:
+Command: .venv\Scripts\python.exe -m scripts.mineru_convert --help
+--audit-dir: True
+inputs: True
+--recursive: True
+--require-json: True
+--output-root: True
+--config: True
+--prefer-multimodal: True
+CLI help audit result: PASS
+
+CONTRACT AUDIT COMPLETE: All checks passed.
+- No CSV manifest feature promise in production code
+- No formal source.raw/ in output contract  
+- No model_version in production code
+- CLI --audit-dir present, all existing parameters preserved
