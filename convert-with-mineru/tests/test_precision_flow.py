@@ -97,6 +97,82 @@ def test_persist_precision_result_keeps_content_list_in_source_json(tmp_path: Pa
     assert (tmp_path / "out" / "report.json" / "report_origin.pdf").exists() is False
 
 
+def test_existing_contract_rewrites_images_prefix_to_stem_images(tmp_path: Path):
+    source = tmp_path / "report.pdf"
+    result = FakeResult()
+
+    targets = persist_precision_result(
+        source, result, tmp_path / "out", keep_raw_tree=True
+    )
+
+    markdown = targets.markdown.read_text(encoding="utf-8")
+    assert "![](report.images/img1.png)" in markdown
+    assert "![](images/img1.png)" not in markdown
+
+
+def test_existing_contract_copies_image_into_stem_images_dir(tmp_path: Path):
+    source = tmp_path / "report.pdf"
+    result = FakeResult()
+
+    targets = persist_precision_result(
+        source, result, tmp_path / "out", keep_raw_tree=True
+    )
+
+    assert targets.images_dir.name == "report.images"
+    assert (targets.images_dir / "img1.png").exists()
+    assert (targets.images_dir / "img1.png").read_bytes() == b"png"
+
+
+def test_existing_contract_writes_four_json_artifacts_to_stem_json_dir(
+    tmp_path: Path,
+):
+    source = tmp_path / "report.pdf"
+    result = FakeResult()
+
+    targets = persist_precision_result(
+        source, result, tmp_path / "out", keep_raw_tree=True
+    )
+    assert targets.json_dir is not None
+    json_dir = targets.json_dir
+
+    assert json_dir.name == "report.json"
+    assert {"content_list", "content_list_v2", "layout", "model"}.issubset(
+        targets.json_files.keys()
+    )
+    for json_type in ("content_list", "content_list_v2", "layout", "model"):
+        assert targets.json_files[json_type].exists(), json_type
+
+
+def test_existing_contract_formal_output_has_no_raw_dir(tmp_path: Path):
+    source = tmp_path / "report.pdf"
+    result = FakeResult()
+
+    persist_precision_result(source, result, tmp_path / "out", keep_raw_tree=True)
+
+    assert (tmp_path / "out" / "report.raw").exists() is False
+    raw_dirs = [
+        p.name
+        for p in (tmp_path / "out").iterdir()
+        if p.is_dir() and p.name.endswith(".raw")
+    ]
+    assert raw_dirs == []
+
+
+def test_existing_contract_excludes_origin_pdf_from_json_dir(tmp_path: Path):
+    source = tmp_path / "report.pdf"
+    result = FakeResult()
+
+    targets = persist_precision_result(
+        source, result, tmp_path / "out", keep_raw_tree=True
+    )
+    assert targets.json_dir is not None
+    json_dir = targets.json_dir
+
+    assert (json_dir / "report_origin.pdf").exists() is False
+    non_json = [p.name for p in json_dir.iterdir() if p.suffix != ".json"]
+    assert non_json == []
+
+
 def test_persist_precision_result_clears_stale_json_dir(tmp_path: Path):
     source = tmp_path / "report.pdf"
     result = FakeResult()
