@@ -1,11 +1,18 @@
 from __future__ import annotations
 
 import argparse
+from datetime import datetime, timezone
 import sys
 from pathlib import Path
 
 from .mineru_config import load_settings
 from .mineru_inputs import discover_inputs, split_routed_inputs
+from .mineru_manifest import (
+    build_manifest_entry,
+    to_posix,
+    update_per_file_manifest,
+    upsert_batch_manifest,
+)
 from .mineru_precision import convert_files
 from .mineru_quality import check_quality_gates
 
@@ -28,7 +35,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-root", default=None)
     parser.add_argument("--config", default=None)
     parser.add_argument("--prefer-multimodal", action="store_true")
+    parser.add_argument("--audit-dir", default=None)
     return parser
+
+
+def _new_batch_id() -> str:
+    return datetime.now(timezone.utc).strftime("%Y%m%d-%H%M%S")
 
 
 def default_output_root(
@@ -82,6 +94,74 @@ def _compute_relative_root(
     return None
 
 
+def _quality_gate_payload(qr) -> dict:
+    return {
+        "status": "passed" if qr.passed else "failed",
+        "passed": qr.passed,
+        "failed_gates": [
+            {
+                "source": gate.source,
+                "gate_id": gate.gate_id,
+                "reason": gate.reason,
+                "suggested_route": gate.suggested_route,
+            }
+            for gate in qr.failed_gates
+        ],
+    }
+
+
+def _relative_source_path(source: Path, relative_root: Path | None) -> Path:
+    if relative_root is None:
+        return Path(source.name)
+    try:
+        return source.relative_to(relative_root)
+    except ValueError:
+        return Path(source.name)
+
+
+def _upsert_rendered_manifest(audit_dir: Path, target, quality_gate: dict) -> None:
+    entry = update_per_file_manifest(target.manifest, {"quality_gate": quality_gate})
+    upsert_batch_manifest(
+        audit_dir / "mineru_manifest.json",
+        str(entry["relative_source_path"]),
+        entry,
+    )
+
+
+def _upsert_failure_manifest(
+    audit_dir: Path,
+    failure: dict,
+    *,
+    relative_root: Path | None,
+    batch_id: str,
+    model: str,
+) -> None:
+    source = Path(failure["source_path"])
+    relative_source_path = _relative_source_path(source, relative_root)
+    entry = build_manifest_entry(
+        source_path=source,
+        relative_source_path=relative_source_path,
+        allocated_stem=source.stem,
+        route=failure.get("route", "mineru"),
+        model=model,
+        output_md=None,
+        output_images_dir=None,
+        output_json_dir=None,
+        raw_archive_path=None,
+        raw_archive_status="failed",
+        image_status="failed",
+        image_count=0,
+        conversion_status="failed",
+        quality_gate={"status": "not_applicable", "passed": None, "failed_gates": []},
+        errors=[str(failure.get("error", ""))],
+        warnings=[],
+        batch_id=batch_id,
+    )
+    upsert_batch_manifest(
+        audit_dir / "mineru_manifest.json", to_posix(relative_source_path) or source.name, entry
+    )
+
+
 def main() -> int:
     parser = build_parser()
     args = parser.parse_args()
@@ -89,8 +169,13 @@ def main() -> int:
     output_root = default_output_root(
         args.inputs, [], args.output_root or settings.default_output_root
     )
+    requested_audit_dir = args.audit_dir or settings.audit_dir
+    audit_dir = Path(requested_audit_dir) if requested_audit_dir else None
+    exclude_roots: list[str | Path] = [output_root]
+    if audit_dir is not None:
+        exclude_roots.append(audit_dir)
     discovered = discover_inputs(
-        args.inputs, recursive=args.recursive, exclude_roots=[output_root]
+        args.inputs, recursive=args.recursive, exclude_roots=exclude_roots
     )
     if not discovered:
         print("未发现可处理的输入文件", file=sys.stderr)
@@ -133,13 +218,39 @@ def main() -> int:
         else None
     )
 
-    rendered = convert_files(
-        supported,
-        output_root,
-        token=token,
-        keep_raw_tree=settings.keep_raw_tree,
-        relative_root=relative_root,
-    )
+    batch_id = _new_batch_id() if audit_dir is not None else None
+    failures: list[dict] = []
+    rendered = []
+    if mineru_files:
+        rendered.extend(
+            convert_files(
+                mineru_files,
+                output_root,
+                token=token,
+                keep_raw_tree=settings.keep_raw_tree,
+                relative_root=relative_root,
+                audit_dir=audit_dir,
+                batch_id=batch_id,
+                route="mineru",
+                model="default",
+                failure_collector=failures if audit_dir is not None else None,
+            )
+        )
+    if mineru_html_files:
+        rendered.extend(
+            convert_files(
+                mineru_html_files,
+                output_root,
+                token=token,
+                keep_raw_tree=settings.keep_raw_tree,
+                relative_root=relative_root,
+                audit_dir=audit_dir,
+                batch_id=batch_id,
+                route="mineru_html",
+                model="MinerU-HTML",
+                failure_collector=failures if audit_dir is not None else None,
+            )
+        )
     quality_failed = False
     for target in rendered:
         md_text = target.markdown.read_text(encoding="utf-8") if target.markdown.exists() else ""
@@ -158,6 +269,18 @@ def main() -> int:
                     + (f" | 建议: {gate.suggested_route}" if gate.suggested_route else ""),
                     file=sys.stderr,
                 )
+        if audit_dir is not None:
+            _upsert_rendered_manifest(audit_dir, target, _quality_gate_payload(qr))
+    if audit_dir is not None and batch_id is not None:
+        for failure in failures:
+            model = "MinerU-HTML" if failure.get("route") == "mineru_html" else "default"
+            _upsert_failure_manifest(
+                audit_dir,
+                failure,
+                relative_root=relative_root,
+                batch_id=batch_id,
+                model=model,
+            )
     if quality_failed:
         return 2
     for target in rendered:

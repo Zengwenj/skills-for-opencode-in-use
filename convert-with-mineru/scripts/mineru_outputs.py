@@ -38,6 +38,7 @@ def build_output_targets(
     keep_raw_tree: bool,
     used_stems: set[str] | None = None,
     relative_root: Path | None = None,
+    allocated_stem: str | None = None,
 ) -> OutputTargets:
     if keep_raw_tree and relative_root is not None:
         try:
@@ -48,7 +49,12 @@ def build_output_targets(
     else:
         dest_dir = output_root
     dest_dir.mkdir(parents=True, exist_ok=True)
-    stem = _allocate_stem(source.stem, used_stems)
+    if allocated_stem is None:
+        stem = _allocate_stem(source.stem, used_stems)
+    else:
+        stem = allocated_stem
+        if used_stems is not None:
+            used_stems.add(stem)
     json_dir = dest_dir / f"{stem}.json" if include_json else None
     return OutputTargets(
         markdown=dest_dir / f"{stem}.md",

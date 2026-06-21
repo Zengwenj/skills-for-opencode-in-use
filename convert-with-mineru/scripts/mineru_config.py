@@ -11,6 +11,7 @@ class Settings:
     token: str | None = None
     default_output_root: str = ""
     keep_raw_tree: bool = False
+    audit_dir: str = ""
 
 
 def _parse_bool(value: object) -> bool:
@@ -39,7 +40,31 @@ def _load_json_file(path: Path) -> dict[str, object]:
     return loaded
 
 
+def _default_config_candidates() -> tuple[Path, ...]:
+    return (
+        Path.cwd() / "mineru.env",
+        Path.cwd() / "mineru.json",
+        Path.home() / ".config" / "opencode" / "local" / "mineru.env",
+        Path.home() / ".config" / "opencode" / "local" / "mineru.json",
+    )
+
+
+def _resolve_default_config_path() -> Path | None:
+    env_hint = os.environ.get("MINERU_CONFIG_PATH")
+    if env_hint:
+        candidate = Path(env_hint).expanduser()
+        if candidate.exists():
+            return candidate
+    for candidate in _default_config_candidates():
+        if candidate.exists():
+            return candidate
+    return None
+
+
 def load_settings(config_path: str | Path | None = None) -> Settings:
+    if config_path is None:
+        config_path = _resolve_default_config_path()
+
     payload: dict[str, object] = {}
     if config_path:
         path = Path(config_path)
@@ -61,9 +86,15 @@ def load_settings(config_path: str | Path | None = None) -> Settings:
         if "KEEP_RAW_TREE" in os.environ
         else payload.get("KEEP_RAW_TREE", False)
     )
+    audit_dir = str(
+        os.environ.get("MINERU_AUDIT_DIR")
+        or payload.get("AUDIT_DIR")
+        or ""
+    )
 
     return Settings(
         token=str(token) if token else None,
         default_output_root=default_output_root,
         keep_raw_tree=keep_raw_tree,
+        audit_dir=audit_dir,
     )

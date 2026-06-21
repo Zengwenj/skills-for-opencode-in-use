@@ -21,6 +21,7 @@ from .mineru_manifest import (
     archive_raw_tree,
     build_manifest_entry,
     detect_image_status,
+    read_batch_manifest,
     to_posix,
     write_per_file_manifest,
 )
@@ -129,6 +130,7 @@ def persist_precision_result(
     batch_id: str | None = None,
     route: str = "mineru",
     model: str = "default",
+    allocated_stem: str | None = None,
 ) -> OutputTargets:
     include_json = True
     targets = build_output_targets(
@@ -138,6 +140,7 @@ def persist_precision_result(
         keep_raw_tree=keep_raw_tree,
         used_stems=used_stems,
         relative_root=relative_root,
+        allocated_stem=allocated_stem,
     )
 
     with tempfile.TemporaryDirectory() as temp_dir:
@@ -236,6 +239,11 @@ def convert_files(
     token: str,
     keep_raw_tree: bool = False,
     relative_root: Path | None = None,
+    audit_dir: Path | None = None,
+    batch_id: str | None = None,
+    route: str = "mineru",
+    model: str = "default",
+    failure_collector: list[dict] | None = None,
 ) -> list[OutputTargets]:
     if not token:
         raise ValueError("precision mode requires MINERU_TOKEN")
@@ -244,18 +252,38 @@ def convert_files(
 
     used_stems: set[str] = set()
     rendered: list[OutputTargets] = []
+    existing_manifest = (
+        read_batch_manifest(audit_dir / "mineru_manifest.json")
+        if audit_dir is not None
+        else {}
+    )
 
     with MinerUClient(token) as client:
         for source in sources:
-            result = _extract_one(client, source)
-            rendered.append(
-                persist_precision_result(
-                    source,
-                    result,
-                    output_root,
-                    keep_raw_tree=keep_raw_tree,
-                    used_stems=used_stems,
-                    relative_root=relative_root,
+            try:
+                relative_source_path = _manifest_relative_source_path(source, relative_root)
+                existing_entry = existing_manifest.get(to_posix(relative_source_path), {})
+                allocated_stem = existing_entry.get("allocated_stem") or None
+                result = _extract_one(client, source)
+                rendered.append(
+                    persist_precision_result(
+                        source,
+                        result,
+                        output_root,
+                        keep_raw_tree=keep_raw_tree,
+                        used_stems=used_stems,
+                        relative_root=relative_root,
+                        audit_dir=audit_dir,
+                        batch_id=batch_id,
+                        route=route,
+                        model=model,
+                        allocated_stem=allocated_stem,
+                    )
                 )
-            )
+            except Exception as exc:
+                if failure_collector is None:
+                    raise
+                failure_collector.append(
+                    {"source_path": source, "error": str(exc), "route": route}
+                )
     return rendered

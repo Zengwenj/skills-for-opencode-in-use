@@ -464,7 +464,19 @@ def test_convert_files_passes_keep_raw_tree_setting_to_persist(
         def extract(self, source: str, *, model: str | None = None):
             return FakeResult()
 
-    def fake_persist(source, result, output_root, keep_raw_tree=False, used_stems=None, relative_root=None):
+    def fake_persist(
+        source,
+        result,
+        output_root,
+        keep_raw_tree=False,
+        used_stems=None,
+        relative_root=None,
+        audit_dir=None,
+        batch_id=None,
+        route="mineru",
+        model="default",
+        allocated_stem=None,
+    ):
         calls.append(keep_raw_tree)
         return persist_precision_result(
             source,
@@ -473,6 +485,11 @@ def test_convert_files_passes_keep_raw_tree_setting_to_persist(
             keep_raw_tree=keep_raw_tree,
             used_stems=used_stems,
             relative_root=relative_root,
+            audit_dir=audit_dir,
+            batch_id=batch_id,
+            route=route,
+            model=model,
+            allocated_stem=allocated_stem,
         )
 
     monkeypatch.setattr(precision, "MinerUClient", FakeClient)
@@ -597,3 +614,103 @@ def test_convert_files_html_uses_sdk_model_keyword_when_model_version_is_absent(
     rendered = convert_files([html], tmp_path / "out", token="token")
 
     assert rendered[0].markdown.read_text(encoding="utf-8") == "# page\n\n"
+
+
+def test_convert_files_forwards_audit_kwargs_to_persist(monkeypatch, tmp_path: Path):
+    import scripts.mineru_precision as precision
+
+    captured = []
+
+    class FakeClient:
+        def __init__(self, token: str):
+            self.token = token
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def extract(self, source: str, *, model: str | None = None):
+            return FakeResult()
+
+    def fake_persist(source, result, output_root, **kwargs):
+        captured.append(kwargs)
+        return persist_precision_result(source, result, output_root, **kwargs)
+
+    monkeypatch.setattr(precision, "MinerUClient", FakeClient)
+    monkeypatch.setattr(precision, "persist_precision_result", fake_persist)
+
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"pdf")
+    audit_dir = tmp_path / "audit"
+
+    convert_files(
+        [source],
+        tmp_path / "out",
+        token="token",
+        audit_dir=audit_dir,
+        batch_id="fixed",
+        route="mineru_html",
+        model="MinerU-HTML",
+    )
+
+    assert captured[0]["audit_dir"] == audit_dir
+    assert captured[0]["batch_id"] == "fixed"
+    assert captured[0]["route"] == "mineru_html"
+    assert captured[0]["model"] == "MinerU-HTML"
+
+
+def test_convert_files_failure_collector_catches_per_file_exception(monkeypatch, tmp_path: Path):
+    import scripts.mineru_precision as precision
+
+    class FailingThenPassingClient:
+        def __init__(self, token: str):
+            self.token = token
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def extract(self, source: str, *, model: str | None = None):
+            if Path(source).name == "bad.pdf":
+                raise RuntimeError("boom")
+            return FakeResult()
+
+    monkeypatch.setattr(precision, "MinerUClient", FailingThenPassingClient)
+    bad = tmp_path / "bad.pdf"
+    good = tmp_path / "good.pdf"
+    bad.write_bytes(b"bad")
+    good.write_bytes(b"good")
+    failures = []
+
+    rendered = convert_files([bad, good], tmp_path / "out", token="token", route="mineru", failure_collector=failures)
+
+    assert [target.stem for target in rendered] == ["good"]
+    assert failures == [{"source_path": bad, "error": "boom", "route": "mineru"}]
+
+
+def test_convert_files_without_failure_collector_propagates_exception(monkeypatch, tmp_path: Path):
+    import scripts.mineru_precision as precision
+
+    class FailingClient:
+        def __init__(self, token: str):
+            self.token = token
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, exc_type, exc, tb):
+            return False
+
+        def extract(self, source: str, *, model: str | None = None):
+            raise RuntimeError("boom")
+
+    monkeypatch.setattr(precision, "MinerUClient", FailingClient)
+    source = tmp_path / "bad.pdf"
+    source.write_bytes(b"bad")
+
+    with pytest.raises(RuntimeError, match="boom"):
+        convert_files([source], tmp_path / "out", token="token")

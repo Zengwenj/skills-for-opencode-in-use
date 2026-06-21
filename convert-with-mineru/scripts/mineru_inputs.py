@@ -45,6 +45,8 @@ def _is_excluded(path: Path, excluded_roots: list[Path]) -> bool:
     for parent in resolved.parents:
         if parent.suffix.lower() in OUTPUT_DIRECTORY_SUFFIXES:
             return True
+        if parent.name == "_review":
+            return True
         if parent.name.lower().startswith("_mineru"):
             return True
     return False
