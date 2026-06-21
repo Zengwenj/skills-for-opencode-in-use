@@ -33,9 +33,10 @@ set MINERU_TOKEN=<在这里填写你的 MineU Token>
 
 真实配置文件不要放进技能目录。
 
-建议位置：
-- `C:\Users\zengw\.config\opencode\local\mineru.env`
-- `C:\Users\zengw\.config\opencode\local\mineru.json`
+建议位置（opencode 标准 local 目录，跨用户通用）：
+- Linux/macOS: `~/.config/opencode/local/mineru.env`
+- Windows: `%USERPROFILE%\.config\opencode\local\mineru.env`
+- 同目录的 `mineru.json` 是 JSON 等价写法
 
 如果技能目录里为了本地验证暂时保留了 `mineru..env` 一类文件，也要把它视为隔离对象：
 - 不把它写进 `SKILL.md` 示例
@@ -47,6 +48,7 @@ set MINERU_TOKEN=<在这里填写你的 MineU Token>
 ```dotenv
 MINERU_TOKEN=<在这里填写你的 MineU Token>
 DEFAULT_OUTPUT_ROOT=
+MINERU_AUDIT_DIR=
 ```
 
 规则：
@@ -60,7 +62,8 @@ DEFAULT_OUTPUT_ROOT=
 ```json
 {
   "MINERU_TOKEN": "<在这里填写你的 MineU Token>",
-  "DEFAULT_OUTPUT_ROOT": ""
+  "DEFAULT_OUTPUT_ROOT": "",
+  "MINERU_AUDIT_DIR": ""
 }
 ```
 
@@ -90,6 +93,23 @@ MinerU 生态中有两个不同的 token 变量，分别用于不同工具：
 
 MCP Precision/VLM 路径以 `MINERU_API_TOKEN` 为认证前提。如果只有 `MINERU_TOKEN` 而没有 `MINERU_API_TOKEN`，MCP 无法使用 Precision/VLM 路径；此时应使用本 skill 或官方 CLI（它们使用 `MINERU_TOKEN`），或先补配 `MINERU_API_TOKEN`。
 
+### 如何检查 opencode MCP 是否已配置 token
+
+**判断 MCP 是否在精准模式，永远不要查 shell 环境变量**——opencode MCP server 的 environment 是 MCP 进程独立空间，与终端 shell 完全独立。
+
+正确做法：读 `opencode.json`（典型位置：`C:\Users\<user>\.config\opencode\opencode.json`），检查 `mcp.<mineru-server-name>.environment.MINERU_API_TOKEN` 字段是否存在且非空（`mcp` 直接子节点，不嵌套 `servers`）。
+
+```powershell
+Get-Content "$env:USERPROFILE\.config\opencode\opencode.json" |
+  ConvertFrom-Json |
+  Select-Object -ExpandProperty mcp |
+  ConvertTo-Json -Depth 10
+```
+
+只要 MCP server 在 `opencode.json` 里配置了 `MINERU_API_TOKEN`，MCP 就一直在精准模式（Precision/VLM），不论 shell 中 `$env:MINERU_API_TOKEN` 是否为空。
+
+参考来源：MinerU 官方 API 文档（https://mineru.net/apiManage/docs）只描述 HTTP API 本身（精准 `/api/v4/*` 需 Bearer token，Agent `/api/v1/agent/*` 免 token），不涉及 opencode 的 MCP 集成方式。opencode MCP environment 配置机制是 opencode 特定的，不在 MinerU 文档覆盖范围内。
+
 ### MCP 可选环境变量
 
 官方 MCP Server 还支持以下可选变量（与本 skill 无关，仅供了解）：
@@ -100,8 +120,13 @@ MCP Precision/VLM 路径以 `MINERU_API_TOKEN` 为认证前提。如果只有 `M
 
 - `DEFAULT_OUTPUT_ROOT` — 本 skill 默认输出根目录
 - `KEEP_RAW_TREE` — 是否保留原始目录树结构
+- `MINERU_AUDIT_DIR` — 外部审计归档根目录（环境变量）；对应的配置文件键为 `AUDIT_DIR`
+  - 默认行为：`<output_root>/../_review/mineru/<batch_id>/`
+  - 审计目录保存完整 MinerU raw 输出和批量 `mineru_manifest.json`
 
-这两个变量只在本 skill 中有效，不是 MCP 配置项。
+这些变量只在本 skill 中有效，不是 MCP 配置项。
+
+**注意**：本 skill 硬限制为仅精准模式（Precision API），不支持 mode 切换。`mineru.env` 里的 `DEFAULT_MODE` 字段（如 `precision`/`vlm`/`pipeline`）会被 `Settings` 忽略——所有路径都走精准 API，无需也无法通过配置改变。
 
 ## 模型选择规则
 

@@ -93,6 +93,7 @@ description: Use when converting local documents or directories with MinerU, esp
 - **CLI/SDK/本 skill** 使用 `MINERU_TOKEN`，不是 `MINERU_API_TOKEN`
 - MCP Precision/VLM 路径必须有 `MINERU_API_TOKEN`；只有 `MINERU_TOKEN` 时不能走 MCP 认证路径
 - MCP 没有 `MINERU_MODEL` 或 `DEFAULT_MODEL` 全局环境变量；不要给 MCP 配置这些不存在的变量
+- **opencode MCP 的 `MINERU_API_TOKEN` 通过 `opencode.json` 的 `mcp.<name>.environment.MINERU_API_TOKEN` 字段配置**（`mcp` 直接子节点，不嵌套 `servers`），与终端 shell 的 `$env:MINERU_API_TOKEN` 是**两个独立空间**。判断 MCP 是否已配置 token，必须读 `opencode.json`，**禁止**用 `$env:MINERU_API_TOKEN` 是否非空来推断——后者只反映当前 shell，永远看不到 MCP server 进程内的 environment。详见 `references/configuration.md` 的"如何检查 opencode MCP 是否已配置 token"。
 
 ### 模型选择规则
 
@@ -110,7 +111,8 @@ description: Use when converting local documents or directories with MinerU, esp
   - `source.model.json`
   - 仅保存本次解析实际产出的类型
 - 图片资源 -> `source.images/`
-- 不再保留 `source.raw/`，也不保留解析阶段生成的源文件副本
+- Per-file manifest -> `source.manifest.json`（记录 source、stem、output_root、batch_id、image_status、image_count、warnings 等）
+- 正式输出目录不暴露 `source.raw/`；完整 MinerU raw 输出归档到外部审计目录 `_review/mineru/<batch_id>/raw/`，由批量 `mineru_manifest.json` 索引
 - 发生重名冲突时使用 `__2`、`__3`
 - 上述命名是本技能对外承诺的稳定 contract，不等于 MinerU 官方原生产物全集；官方可能还有额外中间文件，但默认不直接暴露给用户
 
@@ -162,13 +164,24 @@ python -m scripts.mineru_convert --config "C:\Users\zengw\.config\opencode\local
 python -m scripts.stage_distribution ".\dist\convert-with-mineru"
 ```
 
+审计归档目录（可选）：
+
+```powershell
+# 指定外部审计目录（raw archive + batch manifest）
+python -m scripts.mineru_convert --audit-dir "C:\audit\mineru" "C:\docs\report.pdf"
+```
+
+也可通过环境变量或配置文件设置：
+- 环境变量：`MINERU_AUDIT_DIR`
+- 配置文件键：`AUDIT_DIR`（在 `mineru.env` 或 `mineru.json` 中）
+- 默认行为：`<output_root>/../_review/mineru/<batch_id>/`
+
 ## Fallback
 
 MinerU 路由矩阵与分流说明见：
 - `references/fallback-routing.md`
 
-质量门控说明见：
-- `references/quality-gates.md`（Task 4 实现）
+质量门控结果记录在 per-file manifest（`source.manifest.json`）的 `warnings` 字段，不改变路由阈值。详见 `references/fallback-routing.md`。
 
 脚本级路由规则：
 - `.pdf`/`.doc`/`.docx`/`.ppt`/`.pptx` → `mineru`
@@ -201,6 +214,10 @@ MinerU 路由矩阵与分流说明见：
 - 少量文件只需 Markdown 却走本 skill（优先用官方 MCP，更简单直接）
 - 尝试用本 skill 处理 `csv/tsv/json/xml/epub/zip`（明确不支持）
 - 手写/低质/重复灌词场景不使用 `--prefer-multimodal` 导致输出质量差
+- 通过 `$env:MINERU_API_TOKEN` 检查 opencode MCP 是否已配置 token（错误：MCP server 的 environment 在 `opencode.json` 的 `mcp.<name>.environment.MINERU_API_TOKEN`（`mcp` 直接子节点），与 shell 环境变量独立；shell 检查永远看不到 MCP 进程内的值，会误判为 Flash 模式）
+- 把 raw 审计归档当成正式输出的一部分（raw 只在 `_review` 审计目录，不放入正式输出目录）
+- 期望 `source.manifest.json` 是 MinerU 原生 JSON（manifest 是本 skill 生成的审计元数据，不是 MinerU API 返回的原始 JSON）
+- 图片缺失时自动重试或降级（本 skill 只记录 `image_status` + WARNING，不实现重试或自动降级路由）
 
 ## Red Flags
 

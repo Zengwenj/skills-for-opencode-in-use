@@ -36,4 +36,4 @@ guidance-only 路径不产生转换产物，因此整体 exit 2。
 - 官方支持格式 → `mineru` 或 `mineru_html`
 - 明确不支持的格式 → `unsupported`，不委托其他 skill
 - 文件无法读取 → `invalid_input`
-- 质量门控失败后 → 输出结构化 guidance（source、gate、reason、suggested route），不自动调用多模态工具
+- 质量门控失败后 → 输出结构化 guidance（source、gate、reason、suggested route），不自动调用多模态工具。Per-file manifest（`source.manifest.json`）的 `warnings` 字段会记录 gate 与 reason，不改变路由阈值。

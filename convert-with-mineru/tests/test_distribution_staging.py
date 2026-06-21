@@ -76,3 +76,61 @@ def test_build_distribution_tree_rejects_unsafe_in_tree_destination(tmp_path: Pa
         lambda: build_distribution_tree(source, source / "stage"),
         "safe staging directories",
     )
+
+
+def test_distribution_includes_manifest_module_and_tests(tmp_path: Path):
+    source = tmp_path / "skill"
+    source.mkdir()
+    (source / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    (source / "scripts").mkdir()
+    (source / "scripts" / "mineru_manifest.py").write_text("# manifest\n", encoding="utf-8")
+    (source / "tests").mkdir()
+    (source / "tests" / "test_manifest.py").write_text("# manifest tests\n", encoding="utf-8")
+
+    staged = build_distribution_tree(source, tmp_path / "dist" / "stage")
+
+    assert (staged / "scripts" / "mineru_manifest.py").exists()
+    assert (staged / "tests" / "test_manifest.py").exists()
+
+
+def test_distribution_excludes_live_output_directories(tmp_path: Path):
+    source = tmp_path / "skill"
+    source.mkdir()
+    (source / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    # Live output directories at various levels
+    (source / "_mineru").mkdir()
+    (source / "_mineru" / "output.md").write_text("live\n", encoding="utf-8")
+    (source / "_review").mkdir()
+    (source / "_review" / "audit.json").write_text("audit\n", encoding="utf-8")
+    (source / "subdir").mkdir()
+    (source / "subdir" / "_mineru").mkdir()
+    (source / "subdir" / "_mineru" / "nested.md").write_text("nested\n", encoding="utf-8")
+
+    staged = build_distribution_tree(source, tmp_path / "dist" / "stage")
+
+    assert (staged / "SKILL.md").exists()
+    assert (staged / "_mineru").exists() is False
+    assert (staged / "_review").exists() is False
+    assert (staged / "subdir" / "_mineru").exists() is False
+    # Ordinary files/scripts with similar names should NOT be excluded
+    (source / "scripts").mkdir(parents=True, exist_ok=True)
+    (source / "scripts" / "_mineru_helper.py").write_text("not live\n", encoding="utf-8")
+    staged2 = build_distribution_tree(source, tmp_path / "dist" / "stage2")
+    assert (staged2 / "scripts" / "_mineru_helper.py").exists()
+
+
+def test_distribution_includes_sample_manifest_structure(tmp_path: Path):
+    source = tmp_path / "skill"
+    source.mkdir()
+    (source / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    (source / "examples").mkdir()
+    (source / "examples" / "sample.manifest.json").write_text(
+        '{"source": "example.pdf", "stem": "example"}\n', encoding="utf-8"
+    )
+    (source / "scripts").mkdir()
+    (source / "scripts" / "mineru_manifest.py").write_text("# manifest\n", encoding="utf-8")
+
+    staged = build_distribution_tree(source, tmp_path / "dist" / "stage")
+
+    assert (staged / "examples" / "sample.manifest.json").exists()
+    assert (staged / "scripts" / "mineru_manifest.py").exists()
