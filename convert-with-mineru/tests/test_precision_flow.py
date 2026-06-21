@@ -209,6 +209,66 @@ def test_persist_precision_result_manifest_records_empty_images_dir(tmp_path: Pa
     assert manifest["image_count"] == 0
 
 
+def test_persist_precision_result_manifest_records_path_too_long_raw_archive(
+    monkeypatch, tmp_path: Path
+):
+    import scripts.mineru_manifest as manifest_module
+
+    source = tmp_path / "report.pdf"
+    result = FakeResult()
+    audit_dir = tmp_path / ("a" * 100) / ("b" * 100) / ("c" * 100)
+
+    monkeypatch.setattr(manifest_module.os, "name", "nt")
+
+    targets = persist_precision_result(
+        source,
+        result,
+        tmp_path / "out",
+        audit_dir=audit_dir,
+        batch_id="fixed",
+    )
+
+    manifest = json.loads(targets.manifest.read_text(encoding="utf-8"))
+    assert targets.markdown.read_text(encoding="utf-8") == "# ok\n\n![](report.images/img1.png)\n"
+    assert manifest["conversion_status"] == "success"
+    assert manifest["raw_archive_status"] == "path_too_long"
+    assert manifest["raw_archive_path"] is None
+
+
+def test_persist_precision_result_manifest_records_failed_raw_archive_when_audit_dir_creation_fails(
+    monkeypatch, tmp_path: Path
+):
+    import pathlib
+
+    source = tmp_path / "report.pdf"
+    result = FakeResult()
+    audit_dir = tmp_path / "audit"
+    original_mkdir = pathlib.Path.mkdir
+
+    def fail_raw_archive_parent_mkdir(self, *args, **kwargs):
+        if self == audit_dir / "raw":
+            raise PermissionError("audit denied")
+        return original_mkdir(self, *args, **kwargs)
+
+    monkeypatch.setattr(pathlib.Path, "mkdir", fail_raw_archive_parent_mkdir)
+
+    targets = persist_precision_result(
+        source,
+        result,
+        tmp_path / "out",
+        audit_dir=audit_dir,
+        batch_id="fixed",
+    )
+
+    manifest = json.loads(targets.manifest.read_text(encoding="utf-8"))
+    assert targets.markdown.exists()
+    assert targets.json_files["content_list"].exists()
+    assert (targets.images_dir / "img1.png").exists()
+    assert manifest["conversion_status"] == "success"
+    assert manifest["raw_archive_status"] == "failed"
+    assert manifest["raw_archive_path"] is None
+
+
 def test_persist_precision_result_keeps_content_list_in_source_json(tmp_path: Path):
     source = tmp_path / "report.pdf"
     result = FakeResult()
@@ -690,6 +750,82 @@ def test_convert_files_failure_collector_catches_per_file_exception(monkeypatch,
 
     assert [target.stem for target in rendered] == ["good"]
     assert failures == [{"source_path": bad, "error": "boom", "route": "mineru"}]
+
+
+def test_convert_files_same_stem_batch_allocates_distinct_manifests_and_batch_keys(
+    monkeypatch, tmp_path: Path
+):
+    import scripts.mineru_convert as convert
+    import scripts.mineru_precision as precision
+
+    monkeypatch.setattr(precision, "MinerUClient", FakeMinerU)
+
+    dir_a = tmp_path / "dir_a"
+    dir_b = tmp_path / "dir_b"
+    first = dir_a / "report.pdf"
+    second = dir_b / "report.pdf"
+    dir_a.mkdir()
+    dir_b.mkdir()
+    first.write_bytes(b"a")
+    second.write_bytes(b"b")
+    audit_dir = tmp_path / "audit"
+
+    rendered = convert_files(
+        [first, second],
+        tmp_path / "out",
+        token="token",
+        keep_raw_tree=True,
+        relative_root=tmp_path,
+        audit_dir=audit_dir,
+        batch_id="fixed",
+    )
+    quality_gate = {"status": "passed", "passed": True, "failed_gates": []}
+    for target in rendered:
+        convert._upsert_rendered_manifest(audit_dir, target, quality_gate)
+
+    assert [target.manifest.name for target in rendered] == [
+        "report.manifest.json",
+        "report__2.manifest.json",
+    ]
+    batch = json.loads((audit_dir / "mineru_manifest.json").read_text(encoding="utf-8"))
+    assert set(batch) == {"dir_a/report.pdf", "dir_b/report.pdf"}
+    assert batch["dir_a/report.pdf"]["allocated_stem"] == "report"
+    assert batch["dir_b/report.pdf"]["allocated_stem"] == "report__2"
+
+
+def test_convert_files_rerun_reuses_allocated_stem_and_upserts_batch_manifest(
+    monkeypatch, tmp_path: Path
+):
+    import scripts.mineru_convert as convert
+    import scripts.mineru_precision as precision
+
+    monkeypatch.setattr(precision, "MinerUClient", FakeMinerU)
+    source = tmp_path / "report.pdf"
+    source.write_bytes(b"pdf")
+    output_root = tmp_path / "out"
+    audit_dir = tmp_path / "audit"
+    quality_gate = {"status": "passed", "passed": True, "failed_gates": []}
+
+    first = convert_files(
+        [source], output_root, token="token", audit_dir=audit_dir, batch_id="first"
+    )[0]
+    convert._upsert_rendered_manifest(audit_dir, first, quality_gate)
+    first_manifest_text = first.manifest.read_text(encoding="utf-8")
+
+    second = convert_files(
+        [source], output_root, token="token", audit_dir=audit_dir, batch_id="second"
+    )[0]
+    convert._upsert_rendered_manifest(audit_dir, second, quality_gate)
+
+    batch = json.loads((audit_dir / "mineru_manifest.json").read_text(encoding="utf-8"))
+    assert first.manifest == second.manifest
+    assert second.stem == "report"
+    assert set(batch) == {"report.pdf"}
+    assert batch["report.pdf"]["allocated_stem"] == "report"
+    assert batch["report.pdf"]["batch_id"] == "second"
+    assert first.manifest.read_text(encoding="utf-8") != first_manifest_text
+    assert not (output_root / "report__2.manifest.json").exists()
+    assert not (output_root / "report__2.md").exists()
 
 
 def test_convert_files_without_failure_collector_propagates_exception(monkeypatch, tmp_path: Path):

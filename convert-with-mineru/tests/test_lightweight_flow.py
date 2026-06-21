@@ -300,6 +300,41 @@ def test_main_records_failure_collector_entry_and_continues(tmp_path: Path, monk
     assert manifest["good.pdf"]["conversion_status"] == "success"
 
 
+def test_main_records_mid_batch_failure_and_continues_to_later_file(tmp_path: Path, monkeypatch):
+    first = tmp_path / "01-first.pdf"
+    bad = tmp_path / "02-bad.pdf"
+    third = tmp_path / "03-third.pdf"
+    for source in (first, bad, third):
+        source.write_bytes(b"%PDF-1.7")
+    audit_dir = tmp_path / "audit"
+    rendered = [
+        _make_fake_rendered(tmp_path, "01-first", has_json=True),
+        _make_fake_rendered(tmp_path, "03-third", has_json=True),
+    ]
+
+    def fake_convert_files(sources, output_root, **kwargs):
+        assert list(sources) == [first, bad, third]
+        kwargs["failure_collector"].append(
+            {"source_path": bad, "error": "sdk boom", "route": kwargs["route"]}
+        )
+        return rendered
+
+    monkeypatch.setattr(mineru_convert, "load_settings", lambda config: Settings(token="tok"))
+    monkeypatch.setattr(mineru_convert, "_new_batch_id", lambda: "fixed-batch")
+    monkeypatch.setattr(mineru_convert, "convert_files", fake_convert_files)
+    monkeypatch.setattr("sys.argv", ["mineru_convert", "--audit-dir", str(audit_dir), str(first), str(bad), str(third)])
+
+    assert mineru_convert.main() == 0
+    manifest = json.loads((audit_dir / "mineru_manifest.json").read_text(encoding="utf-8"))
+    assert list(manifest) == ["01-first.pdf", "03-third.pdf", "02-bad.pdf"]
+    assert manifest["01-first.pdf"]["conversion_status"] == "success"
+    assert manifest["03-third.pdf"]["conversion_status"] == "success"
+    assert manifest["02-bad.pdf"]["conversion_status"] == "failed"
+    assert manifest["02-bad.pdf"]["output_md"] is None
+    assert manifest["02-bad.pdf"]["errors"] == ["sdk boom"]
+    assert manifest["02-bad.pdf"]["quality_gate"]["status"] == "not_applicable"
+
+
 def test_main_require_json_missing_exits_2(tmp_path: Path, monkeypatch, capsys):
     pdf = tmp_path / "report.pdf"
     pdf.write_bytes(b"%PDF-1.7")
