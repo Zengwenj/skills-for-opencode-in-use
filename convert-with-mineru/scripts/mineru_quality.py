@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 @dataclass
@@ -112,6 +112,15 @@ def _check_garbled_text(markdown: str, source: str) -> GateFailure | None:
     return None
 
 
+def _resolve_local_image_path(path_str: str, images_dir: Path) -> Path:
+    # Rewritten MD paths are relative to the output root, not images_dir.
+    # Strip a leading `images_dir.name` segment to avoid double-nesting.
+    parts = PurePosixPath(path_str).parts
+    if len(parts) > 1 and parts[0] == images_dir.name:
+        return images_dir / PurePosixPath(*parts[1:])
+    return images_dir / path_str
+
+
 def _check_missing_image_path(
     markdown: str,
     images_dir: Path | None,
@@ -130,7 +139,7 @@ def _check_missing_image_path(
                 reason=f"引用本地图片 '{path_str}' 但无 images_dir",
                 suggested_route="multimodal_looker",
             )
-        resolved = images_dir / path_str
+        resolved = _resolve_local_image_path(path_str, images_dir)
         if not resolved.exists():
             return GateFailure(
                 source=source,

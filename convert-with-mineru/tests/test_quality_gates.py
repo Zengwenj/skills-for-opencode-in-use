@@ -137,6 +137,32 @@ class TestMissingImagePath:
         r = _result(markdown=md)
         assert r.passed
 
+    def test_rewritten_image_path_resolves_correctly(self, tmp_path: Path):
+        # Regression: rewritten MD has `report.images/img1.png` while
+        # images_dir is the actual `<root>/report.images` dir.
+        img_dir = tmp_path / "report.images"
+        img_dir.mkdir()
+        (img_dir / "img1.png").write_bytes(b"\x89PNG")
+        md = "![img](report.images/img1.png)\n" + "足够长度以避免空输出。" * 3
+        r = _result(markdown=md, images_dir=img_dir, source=tmp_path / "report.md")
+        assert r.passed, f"expected pass but failed: {r.failed_gates}"
+
+    def test_rewritten_image_path_with_subdir(self, tmp_path: Path):
+        img_dir = tmp_path / "report.images"
+        (img_dir / "sub").mkdir(parents=True)
+        (img_dir / "sub" / "img1.png").write_bytes(b"\x89PNG")
+        md = "![img](report.images/sub/img1.png)\n" + "足够长度以避免空输出。" * 3
+        r = _result(markdown=md, images_dir=img_dir, source=tmp_path / "report.md")
+        assert r.passed, f"expected pass but failed: {r.failed_gates}"
+
+    def test_rewritten_image_path_missing_still_fails(self, tmp_path: Path):
+        img_dir = tmp_path / "report.images"
+        img_dir.mkdir()
+        md = "![img](report.images/missing.png)\n" + "足够长度以避免空输出。" * 3
+        r = _result(markdown=md, images_dir=img_dir, source=tmp_path / "report.md")
+        assert not r.passed
+        assert any(g.gate_id == "missing_image_path" for g in r.failed_gates)
+
 
 class TestMissingRequiredJson:
     def test_require_json_missing_fails(self):
