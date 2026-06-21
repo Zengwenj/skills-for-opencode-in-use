@@ -168,6 +168,26 @@ def test_upsert_batch_manifest_preserves_other_keys(tmp_path: Path):
     assert result["dept/report.pdf"]["allocated_stem"] == "report-new"
 
 
+def test_rerun_same_file_overwrites_per_file_manifest_and_upserts_batch_once(tmp_path: Path):
+    audit_dir = tmp_path / "audit"
+    per_file_manifest = tmp_path / "out" / "report.manifest.json"
+    batch_manifest = audit_dir / "mineru_manifest.json"
+    first = _entry(batch_id="first", allocated_stem="report")
+    second = _entry(batch_id="second", allocated_stem="report", warnings=["rerun"])
+
+    write_per_file_manifest(per_file_manifest, first)
+    upsert_batch_manifest(batch_manifest, "report.pdf", first)
+    first_text = per_file_manifest.read_text(encoding="utf-8")
+
+    write_per_file_manifest(per_file_manifest, second)
+    batch = upsert_batch_manifest(batch_manifest, "report.pdf", second)
+
+    assert per_file_manifest.read_text(encoding="utf-8") != first_text
+    assert json.loads(per_file_manifest.read_text(encoding="utf-8")) == second
+    assert list(batch) == ["report.pdf"]
+    assert json.loads(batch_manifest.read_text(encoding="utf-8")) == {"report.pdf": second}
+
+
 def test_upsert_batch_manifest_is_atomic(tmp_path: Path, monkeypatch):
     batch = tmp_path / "mineru_manifest.json"
     calls = []
