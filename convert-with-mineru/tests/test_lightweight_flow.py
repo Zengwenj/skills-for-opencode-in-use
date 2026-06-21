@@ -155,6 +155,7 @@ def _make_fake_rendered(tmp_path: Path, name: str, *, has_json: bool):
         json_dir=json_dir if has_json else None,
         json_files=json_files,
         images_dir=tmp_path / "_mineru" / f"{name}.images",
+        manifest=tmp_path / "_mineru" / f"{name}.manifest.json",
         stem=name,
     )
 

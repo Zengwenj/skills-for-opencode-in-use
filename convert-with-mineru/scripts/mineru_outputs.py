@@ -12,6 +12,7 @@ class OutputTargets:
     json_dir: Path | None
     json_files: dict[str, Path]
     images_dir: Path
+    manifest: Path
     stem: str
 
 
@@ -59,6 +60,7 @@ def build_output_targets(
         if json_dir is not None
         else {},
         images_dir=dest_dir / f"{stem}.images",
+        manifest=dest_dir / f"{stem}.manifest.json",
         stem=stem,
     )
 
