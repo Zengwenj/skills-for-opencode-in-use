@@ -8,10 +8,11 @@
 
 | Skill | 类型 | 语言 | 有测试 | 说明 |
 |-------|------|------|--------|------|
-| `convert-with-mineru` | 代码项目 | Python 3 | ✅ pytest (39 tests) | MineU 文档转 Markdown，精准模式 + 分流路由 |
+| `convert-with-mineru` | 代码项目 | Python 3 | ✅ pytest (39 tests) | MinerU 文档转 Markdown，精准模式 + 分流路由 |
 | `office-docs-writer` | 纯 Markdown | — | — | 中文机关/企业公文生成，DOCX 验证约束 |
 | `obsidian-unified-search` | 脚本 | Bash/PowerShell | — | Obsidian 四层故障转移搜索 |
 | `article-analysis-imitation` | 纯 Markdown | — | — | 跨文本风格分析与仿写指导 |
+| `llmwiki-inbox-ingest` | 脚本 | PowerShell 7 | ✅ pwsh fixture (8 cases) | 审批门控 inbox → archive → raw/sources 流程，committed-only MinerU bridge |
 
 ## 共享规范
 
@@ -35,6 +36,16 @@ pytest
 python -m scripts.stage_distribution ".\dist\convert-with-mineru"
 ```
 
+### llmwiki-inbox-ingest（PowerShell 流程脚本）
+
+```powershell
+# 运行全部 fixture 测试（8 cases）
+pwsh -File llmwiki-inbox-ingest/tests/run-tests.ps1 -Case all
+
+# 运行单个 case
+pwsh -File llmwiki-inbox-ingest/tests/run-tests.ps1 -Case e2e_happy_path
+```
+
 ### 其他 skills
 
 无构建步骤，修改 .md 文件后直接生效。
@@ -45,6 +56,7 @@ python -m scripts.stage_distribution ".\dist\convert-with-mineru"
 - 中文公文写作 → `office-docs-writer/`
 - Obsidian 搜索 → `obsidian-unified-search/`
 - 风格分析/仿写 → `article-analysis-imitation/`
+- inbox 归档/审批门控/raw 原料入库 → `llmwiki-inbox-ingest/`
 
 ## 注意事项
 

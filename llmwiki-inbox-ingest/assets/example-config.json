@@ -1,0 +1,19 @@
+{
+  "inboxRoot": "/path/to/inbox",
+  "archiveRoot": "/path/to/archive",
+  "rawSourcesRoot": "/path/to/raw/sources",
+  "reviewRoot": "/path/to/review",
+  "themeList": [
+    "行政发文",
+    "党务工作",
+    "财务管理",
+    "人事管理",
+    "信息科技",
+    "纪检监察",
+    "采购管理",
+    "考勤管理",
+    "部门工作",
+    "其他"
+  ],
+  "scope": "root_inbox_recursive"
+}
