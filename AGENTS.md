@@ -17,7 +17,7 @@
 ## 共享规范
 
 - **SKILL.md 是每个 skill 的权威定义文件**，修改行为前必须先读 SKILL.md
-- 非 git 仓库，无 CI/CD。变更需手动测试验证
+- 本仓库已纳入 git 版本管理；当前未配置 CI/CD。变更需手动测试验证。
 - convert-with-mineru 是唯一有自动化测试的子项目，修改后务必 `pytest`
 - 所有 skill 面向 OpenCode agent 调用，不对外发布 npm/pip 包
 
