@@ -22,3 +22,13 @@ dist/
 live-repeat-output/
 live-repeat-sample.png
 live-repeat-sample.html
+
+# Agent workflow artifacts (oh-my-openagent internal state)
+.omo/
+.learnings/
+
+# Handoff / context docs (may contain sensitive configuration discussion)
+handoff-*.md
+
+# MinerU API config discussion (contains token context, keep local only)
+mineru高精度解析api配置.md
