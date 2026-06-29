@@ -27,7 +27,7 @@
 ## 二-B、DOCX 前置检查（仅当输出为 `.docx`）
 
 - [ ] 已检查目标中文字体是否已安装
-- [ ] 已确认生成链能写入 `w:eastAsia`
+- [ ] 已确认生成链能写入 `w:ascii`、`w:hAnsi`、`w:eastAsia`、`w:cs`，并能分别设置西文字体与中文字体
 - [ ] 已确认生成链能写入 `w:firstLineChars`
 - [ ] 已确认生成链能写入 Heading 样式或等效 `w:outlineLvl`
 - [ ] 若任一能力缺失，已显式报告风险而非继续宣称“格式合规”
@@ -57,14 +57,15 @@
 - [ ] 二级标题使用方正楷体_GBK（不加粗）
 - [ ] 三级标题使用方正仿宋_GBK（不加粗）
 - [ ] 四级标题使用方正仿宋_GBK（不加粗）
-- [ ] 数字和英文使用 Times New Roman
-- [ ] 中文字体已通过 `w:eastAsia` 落地，不是只设置了 `w:ascii` / `w:hAnsi`
+- [ ] 数字和英文使用 Times New Roman（即 `w:ascii="Times New Roman"`）
+- [ ] 中文字体与中文标点已通过 `w:hAnsi`、`w:eastAsia`、`w:cs` 落地；不得只设置 `w:eastAsia`
 - [ ] 若使用替代字体，已在交付说明中明确目标字体与实际字体，不将替代结果视为指定字体已落地
 
 ## 五、标点符号规范
 
 - [ ] 引号使用**中文引号**（"" 和 ''）
 - [ ] 不使用英文引号 ("" 和 '')，除非用户特殊说明
+- [ ] 中文引号、破折号、省略号、连字符等符号需核对 `w:hAnsi` 为目标中文字体
 
 ## 六、字体颜色与字形（重要）
 
@@ -156,7 +157,10 @@ ind.attrib.pop(qn('w:firstLine'), None) # 移除多余的物理宽度参数
 - ✅ 正确：标题编号段落必须映射到对应 Heading 1/2/3/4 或等效 `w:outlineLvl`
 
 ### 6. XML 级验收（关键）
+- ✅ 检查 `w:ascii` 是否为目标西文字体（如 Times New Roman）
+- ✅ 检查 `w:hAnsi` 是否与目标中文字体一致
 - ✅ 检查 `w:eastAsia` 是否与目标中文字体一致
+- ✅ 检查 `w:cs` 是否与目标中文字体一致
 - ✅ 检查 `w:firstLineChars="200"` 是否存在于应缩进段落
 - ✅ 检查主标题段落不得存在 `w:firstLineChars` / `w:firstLine`
 - ✅ 检查表格单元格段落不得存在 `w:firstLineChars` / `w:firstLine`

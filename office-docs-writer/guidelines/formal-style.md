@@ -188,8 +188,12 @@ def set_run_black(run):
 
 def set_run_font(run, cn_font_name, font_size, en_font_name='Times New Roman', bold=False, color=RGBColor(0,0,0)):
     """设置字体，区分中英文字体，并确保颜色为纯黑色，字形为常规"""
-    run.font.name = en_font_name  # 控制西文与数字字体
-    run._element.rPr.rFonts.set(qn('w:eastAsia'), cn_font_name) # 控制中文字体
+    rPr = run._element.get_or_add_rPr()
+    rFonts = rPr.get_or_add_rFonts()
+    rFonts.set(qn('w:ascii'), en_font_name)     # 西文/数字
+    rFonts.set(qn('w:hAnsi'), cn_font_name)     # 中文标点、破折号、省略号等 General Punctuation 的关键兜底槽
+    rFonts.set(qn('w:eastAsia'), cn_font_name)  # 汉字
+    rFonts.set(qn('w:cs'), cn_font_name)        # 复杂脚本/兼容槽
     run.font.size = Pt(font_size)
     run.font.bold = bold
     run.font.color.rgb = color  # 纯黑色 RGB(0,0,0)
@@ -274,7 +278,7 @@ clear_first_line_indent(cell_para)
 - ✅ Heading 样式正确做法：同时设置 `w:color w:val="000000"`，并清除 `w:themeColor`、`w:themeTint`、`w:themeShade`
 
 **DOCX 结果验收**：
-- ✅ 中文字体必须核对 `w:eastAsia`
+- ✅ 中文字体与中文标点必须核对 `w:hAnsi`、`w:eastAsia`、`w:cs` 均为目标中文字体，且 `w:ascii` 为目标西文字体
 - ✅ 1-4级标题和正文（非表格）首行缩进必须核对 `w:firstLineChars="200"`
 - ✅ 文档主标题和表格单元格内段落必须核对不存在 `w:firstLineChars` 与 `w:firstLine`
 - ✅ Heading 1/2/3/4 文字颜色必须核对 `w:val="000000"`，且不存在 `w:themeColor`、`w:themeTint`、`w:themeShade`
