@@ -9,7 +9,6 @@ from .mineru_config import load_settings
 from .mineru_inputs import discover_inputs, split_routed_inputs
 from .mineru_manifest import (
     build_manifest_entry,
-    to_posix,
     update_per_file_manifest,
     upsert_batch_manifest,
 )
@@ -77,7 +76,7 @@ def print_invalid_input_guidance(paths: list[Path]) -> None:
 def print_multimodal_guidance(paths: list[Path]) -> None:
     if not paths:
         return
-    print("以下文件已强制改走多模态 OCR 识别，请分配给 multimodal-looker：")
+    print("以下文件已强制改走多模态 OCR 识别，请分配给 multimodal-looker（LLM 图像识别理解路由）：")
     for path in paths:
         print(f"  - {path} -> multimodal-looker")
 
@@ -157,14 +156,13 @@ def _upsert_failure_manifest(
         warnings=[],
         batch_id=batch_id,
     )
-    upsert_batch_manifest(
-        audit_dir / "mineru_manifest.json", to_posix(relative_source_path) or source.name, entry
-    )
+    upsert_batch_manifest(audit_dir / "mineru_manifest.json", relative_source_path.as_posix(), entry)
 
 
 def main() -> int:
-    parser = build_parser()
-    args = parser.parse_args()
+    args = build_parser().parse_args()
+    if args.require_json:
+        print("警告: --require-json is deprecated / 已弃用；JSON 缺失不再作为失败门控", file=sys.stderr)
     settings = load_settings(args.config)
     output_root = default_output_root(
         args.inputs, [], args.output_root or settings.default_output_root
@@ -181,9 +179,7 @@ def main() -> int:
         print("未发现可处理的输入文件", file=sys.stderr)
         return 2
 
-    routed = split_routed_inputs(
-        discovered, prefer_multimodal=args.prefer_multimodal
-    )
+    routed = split_routed_inputs(discovered, prefer_multimodal=args.prefer_multimodal)
 
     mineru_files = routed.get("mineru", [])
     mineru_html_files = routed.get("mineru_html", [])
@@ -232,7 +228,7 @@ def main() -> int:
                 audit_dir=audit_dir,
                 batch_id=batch_id,
                 route="mineru",
-                model="default",
+                model="vlm",
                 failure_collector=failures if audit_dir is not None else None,
             )
         )
@@ -256,9 +252,7 @@ def main() -> int:
         md_text = target.markdown.read_text(encoding="utf-8") if target.markdown.exists() else ""
         qr = check_quality_gates(
             markdown=md_text,
-            json_files=target.json_files,
             images_dir=target.images_dir if target.images_dir.exists() else None,
-            require_json=args.require_json,
             source=target.markdown,
         )
         if not qr.passed:
@@ -273,7 +267,7 @@ def main() -> int:
             _upsert_rendered_manifest(audit_dir, target, _quality_gate_payload(qr))
     if audit_dir is not None and batch_id is not None:
         for failure in failures:
-            model = "MinerU-HTML" if failure.get("route") == "mineru_html" else "default"
+            model = "MinerU-HTML" if failure.get("route") == "mineru_html" else "vlm"
             _upsert_failure_manifest(
                 audit_dir,
                 failure,
@@ -285,17 +279,6 @@ def main() -> int:
         return 2
     for target in rendered:
         print(target.markdown)
-        if not args.require_json:
-            cl = target.json_files.get("content_list")
-            if cl is None or not cl.exists():
-                missing = str(cl) if cl else "content_list"
-                print(
-                    f"警告: JSON 缺失（未使用 --require-json）: {missing}",
-                    file=sys.stderr,
-                )
-        for json_path in sorted(target.json_files.values()):
-            if json_path.exists():
-                print(json_path)
     return 0
 
 

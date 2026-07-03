@@ -34,8 +34,8 @@ def _allocate_stem(source_stem: str, used_stems: set[str] | None) -> str:
 def build_output_targets(
     source: Path,
     output_root: Path,
-    include_json: bool,
-    keep_raw_tree: bool,
+    include_json: bool = False,
+    keep_raw_tree: bool = False,
     used_stems: set[str] | None = None,
     relative_root: Path | None = None,
     allocated_stem: str | None = None,

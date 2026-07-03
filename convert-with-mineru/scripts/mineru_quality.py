@@ -150,25 +150,6 @@ def _check_missing_image_path(
     return None
 
 
-def _check_missing_required_json(
-    json_files: dict[str, Path],
-    require_json: bool,
-    source: str,
-) -> GateFailure | None:
-    if not require_json:
-        return None
-    content_list = json_files.get("content_list")
-    if content_list is None or not content_list.exists():
-        missing = str(content_list) if content_list else "content_list (未定义)"
-        return GateFailure(
-            source=source,
-            gate_id="missing_required_json",
-            reason=f"--require-json 但 JSON 缺失: {missing}",
-            suggested_route="retry_with_json",
-        )
-    return None
-
-
 def _check_insufficient_page_coverage(
     markdown: str,
     page_count: int | None,
@@ -191,15 +172,11 @@ def _check_insufficient_page_coverage(
 def check_quality_gates(
     markdown: str,
     page_count: int | None = None,
-    json_files: dict[str, Path] | None = None,
     images_dir: Path | None = None,
-    require_json: bool = False,
     source: Path | None = None,
 ) -> QualityGateResult:
     source_str = str(source) if source else "unknown"
     source_path = source or Path(".")
-    if json_files is None:
-        json_files = {}
 
     failed: list[GateFailure] = []
 
@@ -226,10 +203,6 @@ def check_quality_gates(
         gate = _check_missing_image_path(markdown, images_dir, source_path, source_str)
         if gate:
             failed.append(gate)
-
-    gate = _check_missing_required_json(json_files, require_json, source_str)
-    if gate:
-        failed.append(gate)
 
     gate = _check_insufficient_page_coverage(markdown, page_count, source_str)
     if gate:
