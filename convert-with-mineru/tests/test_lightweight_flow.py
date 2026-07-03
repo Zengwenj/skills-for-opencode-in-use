@@ -35,6 +35,7 @@ def test_main_routes_image_prefer_multimodal(tmp_path: Path, monkeypatch, capsys
 
     assert result == 2
     assert "multimodal-looker" in captured.out
+    assert "LLM 图像识别理解路由" in captured.out
     assert str(source) in captured.out
 
 
@@ -134,22 +135,12 @@ def test_main_no_legacy_route_names_in_output(tmp_path: Path, monkeypatch, capsy
     assert "markdown-converter" not in captured.err
 
 
-def _make_fake_rendered(tmp_path: Path, name: str, *, has_json: bool):
+def _make_fake_rendered(tmp_path: Path, name: str):
     from scripts.mineru_outputs import OutputTargets
 
     md = tmp_path / "_mineru" / f"{name}.md"
     md.parent.mkdir(parents=True, exist_ok=True)
     md.write_text("这是足够长的正常文档内容，长度超过二十个字符以满足空输出门控。", encoding="utf-8")
-
-    json_dir = tmp_path / "_mineru" / f"{name}.json"
-    json_files: dict[str, Path] = {}
-    if has_json:
-        json_dir.mkdir(exist_ok=True)
-        cl = json_dir / f"{name}.content_list.json"
-        cl.write_text("[]", encoding="utf-8")
-        json_files["content_list"] = cl
-    else:
-        json_files = {}
 
     manifest = tmp_path / "_mineru" / f"{name}.manifest.json"
     manifest.write_text(
@@ -161,17 +152,16 @@ def _make_fake_rendered(tmp_path: Path, name: str, *, has_json: bool):
                 "relative_source_path": f"{name}.pdf",
                 "allocated_stem": name,
                 "route": "mineru",
-                "model": "default",
+                "model": "vlm",
                 "conversion_status": "success",
                 "output_md": str(md),
-                "output_json_dir": str(json_dir) if has_json else None,
+                "output_json_dir": None,
                 "output_images_dir": str(tmp_path / "_mineru" / f"{name}.images"),
                 "per_file_manifest": str(manifest),
                 "raw_archive_path": str(tmp_path / "_review" / "raw" / name),
                 "raw_archive_status": "archived",
                 "image_status": "none_produced",
                 "image_count": 0,
-                "json_status": "ok" if has_json else "none",
                 "quality_gate": {"status": "not_run", "passed": None, "failed_gates": []},
                 "errors": [],
                 "warnings": [],
@@ -183,8 +173,8 @@ def _make_fake_rendered(tmp_path: Path, name: str, *, has_json: bool):
 
     return OutputTargets(
         markdown=md,
-        json_dir=json_dir if has_json else None,
-        json_files=json_files,
+        json_dir=None,
+        json_files={},
         images_dir=tmp_path / "_mineru" / f"{name}.images",
         manifest=manifest,
         stem=name,
@@ -195,7 +185,7 @@ def test_main_audit_dir_overrides_settings_and_writes_batch_manifest(tmp_path: P
     pdf = tmp_path / "report.pdf"
     pdf.write_bytes(b"%PDF-1.7")
     audit_dir = tmp_path / "custom-audit"
-    rendered = [_make_fake_rendered(tmp_path, "report", has_json=True)]
+    rendered = [_make_fake_rendered(tmp_path, "report")]
     calls = []
 
     def fake_convert_files(sources, output_root, **kwargs):
@@ -227,7 +217,7 @@ def test_main_splits_mineru_and_html_routes_for_audit(tmp_path: Path, monkeypatc
     def fake_convert_files(sources, output_root, **kwargs):
         calls.append((list(sources), kwargs))
         name = Path(sources[0]).stem
-        return [_make_fake_rendered(tmp_path, name, has_json=True)]
+        return [_make_fake_rendered(tmp_path, name)]
 
     monkeypatch.setattr(mineru_convert, "load_settings", lambda config: Settings(token="tok"))
     monkeypatch.setattr(mineru_convert, "_new_batch_id", lambda: "fixed-batch")
@@ -236,7 +226,7 @@ def test_main_splits_mineru_and_html_routes_for_audit(tmp_path: Path, monkeypatc
 
     assert mineru_convert.main() == 0
     assert [call[1]["route"] for call in calls] == ["mineru", "mineru_html"]
-    assert [call[1]["model"] for call in calls] == ["default", "MinerU-HTML"]
+    assert [call[1]["model"] for call in calls] == ["vlm", "MinerU-HTML"]
 
 
 def test_main_unsupported_file_does_not_break_supported_batch_manifest(tmp_path: Path, monkeypatch):
@@ -245,7 +235,7 @@ def test_main_unsupported_file_does_not_break_supported_batch_manifest(tmp_path:
     pdf.write_bytes(b"%PDF-1.7")
     csv.write_bytes(b"a,b")
     audit_dir = tmp_path / "audit"
-    rendered = [_make_fake_rendered(tmp_path, "report", has_json=True)]
+    rendered = [_make_fake_rendered(tmp_path, "report")]
 
     monkeypatch.setattr(mineru_convert, "load_settings", lambda config: Settings(token="tok"))
     monkeypatch.setattr(mineru_convert, "_new_batch_id", lambda: "fixed-batch")
@@ -261,12 +251,13 @@ def test_main_quality_failure_updates_per_file_and_batch_manifest(tmp_path: Path
     pdf = tmp_path / "report.pdf"
     pdf.write_bytes(b"%PDF-1.7")
     audit_dir = tmp_path / "audit"
-    rendered = [_make_fake_rendered(tmp_path, "report", has_json=False)]
+    rendered = [_make_fake_rendered(tmp_path, "report")]
+    rendered[0].markdown.write_text("短", encoding="utf-8")
 
     monkeypatch.setattr(mineru_convert, "load_settings", lambda config: Settings(token="tok"))
     monkeypatch.setattr(mineru_convert, "_new_batch_id", lambda: "fixed-batch")
     monkeypatch.setattr(mineru_convert, "convert_files", lambda *a, **kw: rendered)
-    monkeypatch.setattr("sys.argv", ["mineru_convert", "--audit-dir", str(audit_dir), "--require-json", str(pdf)])
+    monkeypatch.setattr("sys.argv", ["mineru_convert", "--audit-dir", str(audit_dir), str(pdf)])
 
     assert mineru_convert.main() == 2
     per_file = json.loads(rendered[0].manifest.read_text(encoding="utf-8"))
@@ -281,7 +272,7 @@ def test_main_records_failure_collector_entry_and_continues(tmp_path: Path, monk
     bad.write_bytes(b"%PDF-1.7")
     good.write_bytes(b"%PDF-1.7")
     audit_dir = tmp_path / "audit"
-    rendered = [_make_fake_rendered(tmp_path, "good", has_json=True)]
+    rendered = [_make_fake_rendered(tmp_path, "good")]
 
     def fake_convert_files(sources, output_root, **kwargs):
         kwargs["failure_collector"].append({"source_path": bad, "error": "boom", "route": kwargs["route"]})
@@ -308,8 +299,8 @@ def test_main_records_mid_batch_failure_and_continues_to_later_file(tmp_path: Pa
         source.write_bytes(b"%PDF-1.7")
     audit_dir = tmp_path / "audit"
     rendered = [
-        _make_fake_rendered(tmp_path, "01-first", has_json=True),
-        _make_fake_rendered(tmp_path, "03-third", has_json=True),
+        _make_fake_rendered(tmp_path, "01-first"),
+        _make_fake_rendered(tmp_path, "03-third"),
     ]
 
     def fake_convert_files(sources, output_root, **kwargs):
@@ -335,31 +326,13 @@ def test_main_records_mid_batch_failure_and_continues_to_later_file(tmp_path: Pa
     assert manifest["02-bad.pdf"]["quality_gate"]["status"] == "not_applicable"
 
 
-def test_main_require_json_missing_exits_2(tmp_path: Path, monkeypatch, capsys):
+def test_main_require_json_prints_deprecation_warning_but_does_not_fail_json_gate(
+    tmp_path: Path, monkeypatch, capsys
+):
     pdf = tmp_path / "report.pdf"
     pdf.write_bytes(b"%PDF-1.7")
 
-    rendered = [_make_fake_rendered(tmp_path, "report", has_json=False)]
-
-    monkeypatch.setattr(
-        mineru_convert, "load_settings", lambda config: Settings(token="tok")
-    )
-    monkeypatch.setattr(mineru_convert, "convert_files", lambda *a, **kw: rendered)
-    monkeypatch.setattr("sys.argv", ["mineru_convert", "--require-json", str(pdf)])
-
-    result = mineru_convert.main()
-    captured = capsys.readouterr()
-
-    assert result == 2
-    assert "missing_required_json" in captured.err
-    assert "content_list" in captured.err
-
-
-def test_main_require_json_present_exits_0(tmp_path: Path, monkeypatch, capsys):
-    pdf = tmp_path / "report.pdf"
-    pdf.write_bytes(b"%PDF-1.7")
-
-    rendered = [_make_fake_rendered(tmp_path, "report", has_json=True)]
+    rendered = [_make_fake_rendered(tmp_path, "report")]
 
     monkeypatch.setattr(
         mineru_convert, "load_settings", lambda config: Settings(token="tok")
@@ -371,22 +344,6 @@ def test_main_require_json_present_exits_0(tmp_path: Path, monkeypatch, capsys):
     captured = capsys.readouterr()
 
     assert result == 0
-
-
-def test_main_no_require_json_missing_warns_but_exits_0(tmp_path: Path, monkeypatch, capsys):
-    pdf = tmp_path / "report.pdf"
-    pdf.write_bytes(b"%PDF-1.7")
-
-    rendered = [_make_fake_rendered(tmp_path, "report", has_json=False)]
-
-    monkeypatch.setattr(
-        mineru_convert, "load_settings", lambda config: Settings(token="tok")
-    )
-    monkeypatch.setattr(mineru_convert, "convert_files", lambda *a, **kw: rendered)
-    monkeypatch.setattr("sys.argv", ["mineru_convert", str(pdf)])
-
-    result = mineru_convert.main()
-    captured = capsys.readouterr()
-
-    assert result == 0
-    assert "content_list" in captured.err or "JSON" in captured.err
+    assert "--require-json" in captured.err
+    assert "deprecated" in captured.err.lower() or "弃用" in captured.err
+    assert "missing_required_json" not in captured.err

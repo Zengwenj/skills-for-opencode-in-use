@@ -72,6 +72,33 @@ def test_load_settings_reads_default_values_from_environment(monkeypatch, tmp_pa
     assert settings.keep_raw_tree is True
 
 
+def test_load_settings_ignores_mineru_api_token(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "fake_home")
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path / "fake_cwd")
+    monkeypatch.delenv("MINERU_TOKEN", raising=False)
+    monkeypatch.delenv("MINERU_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("MINERU_API_TOKEN", "mcp-token")
+
+    settings = load_settings()
+
+    assert settings.token is None
+
+
+def test_load_settings_ignores_model_switch_environment(monkeypatch, tmp_path: Path):
+    monkeypatch.setattr(Path, "home", lambda: tmp_path / "fake_home")
+    monkeypatch.setattr(Path, "cwd", lambda: tmp_path / "fake_cwd")
+    monkeypatch.delenv("MINERU_TOKEN", raising=False)
+    monkeypatch.delenv("MINERU_CONFIG_PATH", raising=False)
+    monkeypatch.setenv("DEFAULT_MODE", "pipeline")
+    monkeypatch.setenv("MINERU_MODEL", "pipeline")
+
+    settings = load_settings()
+
+    assert not hasattr(settings, "default_mode")
+    assert not hasattr(settings, "model")
+    assert settings.token is None
+
+
 def test_load_settings_auto_discovers_home_mineru_env(monkeypatch, tmp_path: Path):
     fake_home = tmp_path / "fake_home"
     local_dir = fake_home / ".config" / "opencode" / "local"

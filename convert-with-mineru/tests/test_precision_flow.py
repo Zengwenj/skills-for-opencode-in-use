@@ -1,4 +1,3 @@
-import inspect
 import io
 import json
 import zipfile
@@ -75,19 +74,12 @@ def test_persist_precision_result_writes_source_named_outputs(tmp_path: Path):
         source, result, tmp_path / "out", keep_raw_tree=True
     )
 
-    assert targets.json_dir is not None
     assert (
         targets.markdown.read_text(encoding="utf-8")
         == "# ok\n\n![](report.images/img1.png)\n"
     )
-    assert targets.json_dir.name == "report.json"
-    assert (
-        targets.json_files["content_list"].read_text(encoding="utf-8").startswith("[")
-    )
-    assert (
-        targets.json_files["content_list_v2"].read_text(encoding="utf-8")
-        == '{\n  "version": 2\n}'
-    )
+    assert targets.json_dir is None
+    assert targets.json_files == {}
     assert (targets.images_dir / "img1.png").read_bytes() == b"png"
     assert (tmp_path / "out" / "report.raw").exists() is False
     assert targets.manifest.exists() is False
@@ -114,7 +106,7 @@ def test_persist_precision_result_writes_manifest_and_archives_raw_stage(
     assert manifest["batch_id"] == "fixed"
     assert manifest["allocated_stem"] == "report"
     assert manifest["route"] == "mineru"
-    assert manifest["model"] == "default"
+    assert manifest["model"] == "vlm"
     assert manifest["conversion_status"] == "success"
     assert manifest["quality_gate"] == {
         "status": "not_run",
@@ -127,7 +119,6 @@ def test_persist_precision_result_writes_manifest_and_archives_raw_stage(
 
     for field in (
         "output_md",
-        "output_json_dir",
         "output_images_dir",
         "per_file_manifest",
         "raw_archive_path",
@@ -146,18 +137,13 @@ def test_persist_precision_result_writes_manifest_and_archives_raw_stage(
     assert (raw_archive / "images" / "img1.png").read_bytes() == b"png"
     assert (raw_archive / "report_origin.pdf").read_bytes() == b"pdf"
 
-    assert targets.json_dir is not None
-    assert {path.name for path in targets.json_dir.iterdir()} == {
-        "report.content_list.json",
-        "report.content_list_v2.json",
-        "report.layout.json",
-        "report.model.json",
-    }
+    assert manifest["output_json_dir"] is None
+    assert targets.json_dir is None
+    assert targets.json_files == {}
     assert (tmp_path / "out" / "report.raw").exists() is False
 
     save_all_by_name = {path.name: path for path in result.save_all_calls}
-    assert {"json", "raw"}.issubset(save_all_by_name)
-    assert save_all_by_name["raw"].parent == save_all_by_name["json"].parent
+    assert set(save_all_by_name) == {"raw"}
 
 
 def test_persist_precision_result_skips_manifest_and_raw_archive_without_audit_dir(
@@ -170,7 +156,7 @@ def test_persist_precision_result_skips_manifest_and_raw_archive_without_audit_d
 
     assert targets.manifest.exists() is False
     assert (tmp_path / "_review").exists() is False
-    assert [path.name for path in result.save_all_calls] == ["json"]
+    assert result.save_all_calls == []
 
 
 def test_persist_precision_result_manifest_records_no_images_produced(
@@ -262,38 +248,12 @@ def test_persist_precision_result_manifest_records_failed_raw_archive_when_audit
 
     manifest = json.loads(targets.manifest.read_text(encoding="utf-8"))
     assert targets.markdown.exists()
-    assert targets.json_files["content_list"].exists()
+    assert targets.json_dir is None
+    assert targets.json_files == {}
     assert (targets.images_dir / "img1.png").exists()
     assert manifest["conversion_status"] == "success"
     assert manifest["raw_archive_status"] == "failed"
     assert manifest["raw_archive_path"] is None
-
-
-def test_persist_precision_result_keeps_content_list_in_source_json(tmp_path: Path):
-    source = tmp_path / "report.pdf"
-    result = FakeResult()
-
-    targets = persist_precision_result(
-        source, result, tmp_path / "out", keep_raw_tree=True
-    )
-
-    assert (
-        targets.json_files["content_list"].read_text(encoding="utf-8")
-        == '[\n  {\n    "type": "text",\n    "text": "hello"\n  }\n]'
-    )
-    assert (
-        targets.json_files["content_list_v2"].read_text(encoding="utf-8")
-        == '{\n  "version": 2\n}'
-    )
-    assert (
-        targets.json_files["layout"].read_text(encoding="utf-8")
-        == '{\n  "blocks": []\n}'
-    )
-    assert (
-        targets.json_files["model"].read_text(encoding="utf-8") == '{\n  "pages": 1\n}'
-    )
-    assert (tmp_path / "out" / "report.raw").exists() is False
-    assert (tmp_path / "out" / "report.json" / "report_origin.pdf").exists() is False
 
 
 def test_existing_contract_rewrites_images_prefix_to_stem_images(tmp_path: Path):
@@ -322,7 +282,7 @@ def test_existing_contract_copies_image_into_stem_images_dir(tmp_path: Path):
     assert (targets.images_dir / "img1.png").read_bytes() == b"png"
 
 
-def test_existing_contract_writes_four_json_artifacts_to_stem_json_dir(
+def test_persist_precision_result_writes_no_formal_json_files(
     tmp_path: Path,
 ):
     source = tmp_path / "report.pdf"
@@ -331,15 +291,10 @@ def test_existing_contract_writes_four_json_artifacts_to_stem_json_dir(
     targets = persist_precision_result(
         source, result, tmp_path / "out", keep_raw_tree=True
     )
-    assert targets.json_dir is not None
-    json_dir = targets.json_dir
 
-    assert json_dir.name == "report.json"
-    assert {"content_list", "content_list_v2", "layout", "model"}.issubset(
-        targets.json_files.keys()
-    )
-    for json_type in ("content_list", "content_list_v2", "layout", "model"):
-        assert targets.json_files[json_type].exists(), json_type
+    assert targets.json_dir is None
+    assert targets.json_files == {}
+    assert list((tmp_path / "out").rglob("*.json")) == []
 
 
 def test_existing_contract_formal_output_has_no_raw_dir(tmp_path: Path):
@@ -357,105 +312,6 @@ def test_existing_contract_formal_output_has_no_raw_dir(tmp_path: Path):
     assert raw_dirs == []
 
 
-def test_existing_contract_excludes_origin_pdf_from_json_dir(tmp_path: Path):
-    source = tmp_path / "report.pdf"
-    result = FakeResult()
-
-    targets = persist_precision_result(
-        source, result, tmp_path / "out", keep_raw_tree=True
-    )
-    assert targets.json_dir is not None
-    json_dir = targets.json_dir
-
-    assert (json_dir / "report_origin.pdf").exists() is False
-    non_json = [p.name for p in json_dir.iterdir() if p.suffix != ".json"]
-    assert non_json == []
-
-
-def test_persist_precision_result_clears_stale_json_dir(tmp_path: Path):
-    source = tmp_path / "report.pdf"
-    result = FakeResult()
-    stale_dir = tmp_path / "out" / "report.json"
-    stale_dir.mkdir(parents=True)
-    (stale_dir / "report.legacy.json").write_text('{"stale": true}', encoding="utf-8")
-    (stale_dir / "report.content_list_v2.json").write_text(
-        '{"stale": true}', encoding="utf-8"
-    )
-
-    targets = persist_precision_result(
-        source, result, tmp_path / "out", keep_raw_tree=False
-    )
-
-    assert (stale_dir / "report.legacy.json").exists() is False
-    assert (stale_dir / "report.content_list_v2.json").read_text(
-        encoding="utf-8"
-    ) == '{\n  "version": 2\n}'
-    assert targets.json_files["content_list"].exists()
-
-
-def test_persist_precision_result_retries_transient_rmtree_permission_error(
-    monkeypatch, tmp_path: Path
-):
-    import scripts.mineru_precision as precision
-
-    source = tmp_path / "report.pdf"
-    result = FakeResult()
-    stale_dir = tmp_path / "out" / "report.json"
-    stale_dir.mkdir(parents=True)
-    (stale_dir / "report.legacy.json").write_text('{"stale": true}', encoding="utf-8")
-
-    calls = {"count": 0}
-    real_rmtree = precision.shutil.rmtree
-
-    def flaky_rmtree(path, *args, **kwargs):
-        calls["count"] += 1
-        if calls["count"] == 1:
-            raise PermissionError("transient lock")
-        return real_rmtree(path, *args, **kwargs)
-
-    monkeypatch.setattr(precision.shutil, "rmtree", flaky_rmtree)
-    monkeypatch.setattr(precision.time, "sleep", lambda _: None)
-
-    targets = persist_precision_result(
-        source, result, tmp_path / "out", keep_raw_tree=False
-    )
-
-    assert calls["count"] >= 2
-    assert (stale_dir / "report.legacy.json").exists() is False
-    assert targets.json_files["content_list"].exists()
-
-
-def test_persist_precision_result_falls_back_to_powershell_remove_on_windows(
-    monkeypatch, tmp_path: Path
-):
-    import scripts.mineru_precision as precision
-
-    stale_dir = tmp_path / "out" / "report.json"
-    stale_dir.mkdir(parents=True)
-    (stale_dir / "report.legacy.json").write_text('{"stale": true}', encoding="utf-8")
-
-    real_rmtree = precision.shutil.rmtree
-    calls = {"shell": 0}
-
-    def locked_rmtree(path, *args, **kwargs):
-        raise PermissionError("persistent lock")
-
-    def fake_run(command, check):
-        calls["shell"] += 1
-        real_rmtree(stale_dir)
-        return None
-
-    monkeypatch.setattr(precision.shutil, "rmtree", locked_rmtree)
-    monkeypatch.setattr(precision.time, "sleep", lambda _: None)
-    monkeypatch.setattr(precision.os, "name", "nt", raising=False)
-    monkeypatch.setattr(precision.subprocess, "run", fake_run)
-
-    precision._reset_json_dir(stale_dir, retries=2, delay_seconds=0)
-
-    assert calls["shell"] == 1
-    assert (stale_dir / "report.legacy.json").exists() is False
-
-
 class FakeMinerU:
     def __init__(self, token: str):
         self.token = token
@@ -467,14 +323,19 @@ class FakeMinerU:
         return False
 
     def extract(self, source: str, *, model: str | None = None):
+        raise AssertionError("per-file extract should not be used for batch conversion")
+
+    def extract_batch(self, sources, **kwargs):
+        self.batch_call = {"sources": list(sources), **kwargs}
+        return [self._result_for_source(source) for source in sources]
+
+    @staticmethod
+    def _result_for_source(source: str):
         name = Path(source).stem
         result = FakeResult()
         result.markdown = f"# {name}\n\n![](images/img1.png)\n"
         result.content_list = [{"name": name}]
         return result
-
-    def extract_batch(self, sources):
-        raise AssertionError("batch API should not be used for source-name mapping")
 
 
 def test_convert_files_uses_stable_source_mapping_for_multiple_inputs(
@@ -482,7 +343,8 @@ def test_convert_files_uses_stable_source_mapping_for_multiple_inputs(
 ):
     import scripts.mineru_precision as precision
 
-    monkeypatch.setattr(precision, "MinerUClient", FakeMinerU)
+    client = FakeMinerU("token")
+    monkeypatch.setattr(precision, "MinerUClient", lambda token: client)
 
     first = tmp_path / "alpha.pdf"
     second = tmp_path / "beta.pdf"
@@ -500,8 +362,8 @@ def test_convert_files_uses_stable_source_mapping_for_multiple_inputs(
         rendered[1].markdown.read_text(encoding="utf-8")
         == "# beta\n\n![](beta.images/img1.png)\n"
     )
-    assert rendered[0].json_files["content_list"].name == "alpha.content_list.json"
-    assert rendered[1].json_files["content_list"].name == "beta.content_list.json"
+    assert client.batch_call["sources"] == [str(first), str(second)]
+    assert client.batch_call["model_version"] == "vlm"
 
 
 def test_convert_files_passes_keep_raw_tree_setting_to_persist(
@@ -534,7 +396,7 @@ def test_convert_files_passes_keep_raw_tree_setting_to_persist(
         audit_dir=None,
         batch_id=None,
         route="mineru",
-        model="default",
+        model="vlm",
         allocated_stem=None,
     ):
         calls.append(keep_raw_tree)
@@ -567,6 +429,7 @@ class RecordingMinerU:
     def __init__(self, token: str):
         self.token = token
         self.calls: list[dict] = []
+        self.batch_calls: list[dict] = []
 
     def __enter__(self):
         return self
@@ -575,12 +438,18 @@ class RecordingMinerU:
         return False
 
     def extract(self, source: str, *, model: str | None = None, **kwargs):
-        if "model_version" in kwargs:
-            raise AssertionError("model_version must not be passed to SDK extract")
-        call = {"source": source}
+        call = {"source": source, **kwargs}
         if model is not None:
             call["model"] = model
         self.calls.append(call)
+        return self._result_for_source(source)
+
+    def extract_batch(self, sources, **kwargs):
+        self.batch_calls.append({"sources": list(sources), **kwargs})
+        return [self._result_for_source(source) for source in sources]
+
+    @staticmethod
+    def _result_for_source(source: str):
         name = Path(source).stem
         result = FakeResult()
         result.markdown = f"# {name}\n\n![](images/img1.png)\n"
@@ -588,7 +457,9 @@ class RecordingMinerU:
         return result
 
 
-def test_convert_files_html_receives_html_model(monkeypatch, tmp_path: Path):
+def test_convert_files_html_batch_receives_mineru_html_model_version(
+    monkeypatch, tmp_path: Path
+):
     import scripts.mineru_precision as precision
 
     client = RecordingMinerU("token")
@@ -599,12 +470,13 @@ def test_convert_files_html_receives_html_model(monkeypatch, tmp_path: Path):
 
     convert_files([html], tmp_path / "out", token="token")
 
-    assert len(client.calls) == 1
-    assert client.calls[0]["model"] == "html"
-    assert "model_version" not in client.calls[0]
+    assert len(client.batch_calls) == 1
+    assert client.batch_calls[0]["sources"] == [str(html)]
+    assert client.batch_calls[0]["model_version"] == "MinerU-HTML"
+    assert client.calls == []
 
 
-def test_convert_files_pdf_no_model_version(monkeypatch, tmp_path: Path):
+def test_convert_files_pdf_batch_receives_vlm_model_version(monkeypatch, tmp_path: Path):
     import scripts.mineru_precision as precision
 
     client = RecordingMinerU("token")
@@ -615,9 +487,10 @@ def test_convert_files_pdf_no_model_version(monkeypatch, tmp_path: Path):
 
     convert_files([pdf], tmp_path / "out", token="token")
 
-    assert len(client.calls) == 1
-    assert "model_version" not in client.calls[0]
-    assert "model" not in client.calls[0]
+    assert len(client.batch_calls) == 1
+    assert client.batch_calls[0]["sources"] == [str(pdf)]
+    assert client.batch_calls[0]["model_version"] == "vlm"
+    assert client.calls == []
 
 
 def test_convert_files_mixed_html_and_pdf(monkeypatch, tmp_path: Path):
@@ -633,47 +506,16 @@ def test_convert_files_mixed_html_and_pdf(monkeypatch, tmp_path: Path):
 
     convert_files([html, pdf], tmp_path / "out", token="token")
 
-    assert len(client.calls) == 2
-    html_call = next(c for c in client.calls if c["source"].endswith("page.html"))
-    pdf_call = next(c for c in client.calls if c["source"].endswith("doc.pdf"))
-    assert html_call["model"] == "html"
-    assert "model_version" not in html_call
-    assert "model_version" not in pdf_call
-    assert "model" not in pdf_call
-
-
-class ExtractWithModelOnly:
-    def __init__(self, token: str):
-        self.token = token
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc, tb):
-        return False
-
-    def extract(self, source: str, *, model: str | None = None, timeout: int = 300):
-        assert model == "html"
-        name = Path(source).stem
-        result = FakeResult()
-        result.markdown = f"# {name}\n\n"
-        result.content_list = [{"name": name}]
-        return result
-
-
-def test_convert_files_html_uses_sdk_model_keyword_when_model_version_is_absent(
-    monkeypatch, tmp_path: Path
-):
-    import scripts.mineru_precision as precision
-
-    monkeypatch.setattr(precision, "MinerUClient", ExtractWithModelOnly)
-
-    html = tmp_path / "page.html"
-    html.write_text("<html><body>hello</body></html>", encoding="utf-8")
-
-    rendered = convert_files([html], tmp_path / "out", token="token")
-
-    assert rendered[0].markdown.read_text(encoding="utf-8") == "# page\n\n"
+    assert len(client.batch_calls) == 2
+    html_call = next(
+        call for call in client.batch_calls if call["sources"] == [str(html)]
+    )
+    pdf_call = next(
+        call for call in client.batch_calls if call["sources"] == [str(pdf)]
+    )
+    assert html_call["model_version"] == "MinerU-HTML"
+    assert pdf_call["model_version"] == "vlm"
+    assert client.calls == []
 
 
 def test_convert_files_forwards_audit_kwargs_to_persist(monkeypatch, tmp_path: Path):

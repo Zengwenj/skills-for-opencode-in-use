@@ -14,9 +14,7 @@ from scripts.mineru_quality import (
 def _result(
     markdown: str | None = None,
     page_count: int | None = None,
-    json_files: dict[str, Path] | None = None,
     images_dir: Path | None = None,
-    require_json: bool = False,
     source: Path | None = None,
 ) -> QualityGateResult:
     if markdown is None:
@@ -24,9 +22,7 @@ def _result(
     return check_quality_gates(
         markdown=markdown,
         page_count=page_count,
-        json_files=json_files,
         images_dir=images_dir,
-        require_json=require_json,
         source=source or Path("test.pdf"),
     )
 
@@ -162,29 +158,6 @@ class TestMissingImagePath:
         r = _result(markdown=md, images_dir=img_dir, source=tmp_path / "report.md")
         assert not r.passed
         assert any(g.gate_id == "missing_image_path" for g in r.failed_gates)
-
-
-class TestMissingRequiredJson:
-    def test_require_json_missing_fails(self):
-        r = _result(
-            json_files={},
-            require_json=True,
-        )
-        assert not r.passed
-        assert any(g.gate_id == "missing_required_json" for g in r.failed_gates)
-
-    def test_require_json_present_passes(self, tmp_path: Path):
-        cl = tmp_path / "test.content_list.json"
-        cl.write_text("[]", encoding="utf-8")
-        r = _result(
-            json_files={"content_list": cl},
-            require_json=True,
-        )
-        assert r.passed
-
-    def test_no_require_json_missing_passes(self):
-        r = _result(json_files={}, require_json=False)
-        assert r.passed
 
 
 class TestInsufficientPageCoverage:
