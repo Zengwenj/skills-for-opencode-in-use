@@ -29,7 +29,7 @@ description: This skill should be used when running weekly inbox cleanup, ingest
 
 6. **Prepare MinerU batch：** 运行 `prepare-mineru-batch.ps1`，仅从 `apply-manifest.jsonl` 中 `committed` 或 `skipped_existing_committed` 的 archive 文件生成 `mineru-batch.json`。未 committed 的文件不得进入批次。
 
-7. **Agent 调 MinerU：** agent 读取 `mineru-batch.json`，按 source_id 调用 `mineru_parse_documents` MCP 工具，输出保存到 `run/mineru-output/<source_id>/`。PowerShell 脚本不得直接调用 MCP。
+7. **Agent 调 MinerU：** agent 读取 `mineru-batch.json`，按 source_id 调用 `convert-with-mineru`，输出保存到 `run/mineru-output/<source_id>/`。PowerShell 脚本不得直接调用 convert-with-mineru。
 
 8. **Ingest raw 与 validate：** 运行 `ingest-mineru-output.ps1` 将合格 Markdown 写入 `rawSourcesRoot`，带 raw frontmatter；然后运行 `validate-run.ps1` 检查全链路产物完整性。
 
@@ -66,7 +66,7 @@ PowerShell 7 脚本，每个脚本首行 `#Requires -Version 7.0`，输出 UTF-8
 - 每个脚本错误必须说明：发生了什么、哪个文件或字段出错、期望值是什么、下一步怎么修。
 - 缺配置、pending approval、hash mismatch、source changed、target exists、path escape、raw quality failed 等场景一律 fail closed，并把可执行修复动作写入 stderr 或 `failures.csv`。
 - 操作者只需要按五分钟每周流程顺序推进；任何非零退出都先阅读对应 run artifact 和 `failures.csv`，修复后重新从安全阶段开始。
-- PowerShell 脚本不调用 MinerU MCP；agent 根据 `mineru-batch.json` 调用 MCP 或使用 mock mode fixture。
+- PowerShell 脚本不调用 convert-with-mineru；agent 根据 `mineru-batch.json` 调用 convert-with-mineru 或使用 mock mode fixture。
 
 ## 硬边界
 

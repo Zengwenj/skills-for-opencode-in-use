@@ -46,7 +46,7 @@ $script:ManifestFields = @('schema_version', 'run_id', 'scope', 'created_at', 'c
 $script:ApplyFields = @('source_id', 'run_id', 'state', 'source_path', 'source_sha256', 'archive_path', 'archive_sha256', 'attempt', 'timestamp')
 $script:ApplyStates = @('planned', 'copied_temp', 'committed', 'failed', 'skipped_existing_committed', 'preflight_failed', 'verified_temp', 'failed_partial_deleted', 'failed_divergent', 'skipped')
 $script:BatchFields = @('source_id', 'archive_path', 'archive_sha256', 'extension', 'mineru_route', 'output_dir', 'raw_target_hint')
-$script:BatchRoutes = @('mcp_flash', 'mcp_token', 'mock', 'skip_unsupported', 'mcp_flash_or_token', 'conditional')
+$script:BatchRoutes = @('convert_with_mineru', 'convert_with_mineru_html', 'mock', 'skip_unsupported', 'conditional')
 $script:SnapshotFields = @('source_id', 'rel_path', 'abs_path', 'sha256', 'size', 'mtime', 'exists')
 $script:DiffFields = @('source_id', 'rel_path', 'before_sha256', 'after_sha256', 'change_type', 'allowed')
 $script:ParseFields = @('source_id', 'run_id', 'archive_path', 'archive_sha256', 'route', 'status', 'output_path', 'content_bytes', 'has_heading', 'retry_count')
@@ -511,7 +511,7 @@ function Test-MineruBatch {
             Write-ValidationError -What 'MinerU output directory leaf does not match source_id' -Where $outputDir -Expected $sourceId -Fix 'Regenerate mineru-batch.json with stable output_dir values.'
             $valid = $false
         } else {
-            $markdownPath = Join-Path -Path $outputDir -ChildPath 'full.md'
+            $markdownPath = Join-Path -Path $outputDir -ChildPath "$sourceId.md"
             if (-not (Test-RequiredFile -Path $markdownPath)) { $valid = $false }
         }
     }
@@ -541,7 +541,7 @@ function Test-ParseManifest {
                 $valid = $false
             }
             if ([string]::IsNullOrWhiteSpace([string]$row.output_path) -or -not (Test-Path -LiteralPath ([string]$row.output_path) -PathType Leaf)) {
-                Write-ValidationError -What 'Parsed output_path is missing on disk' -Where "$Path -> $($row.source_id).output_path" -Expected 'Existing MinerU full.md path' -Fix 'Run the MinerU bridge or mock mode before validation.'
+                Write-ValidationError -What 'Parsed output_path is missing on disk' -Where "$Path -> $($row.source_id).output_path" -Expected "Existing MinerU <source_id>.md path" -Fix 'Run the MinerU bridge or mock mode before validation.'
                 $valid = $false
             }
         }

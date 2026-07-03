@@ -15,22 +15,22 @@ $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:RequiredConfigFields = @('inboxRoot', 'archiveRoot', 'rawSourcesRoot', 'reviewRoot', 'themeList', 'scope')
 $script:CommittedStates = @('committed', 'skipped_existing_committed')
 $script:CapabilityMatrix = @{
-    '.pdf'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
+    '.pdf'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
     '.doc'  = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'token_or_env_detected'; reason_if_unsupported = 'Flash mode may not support .doc; require environment capability check' }
-    '.docx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
+    '.docx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
     '.ppt'  = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'token_or_env_detected'; reason_if_unsupported = 'Flash mode may not support .ppt; require environment capability check' }
-    '.pptx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.xls'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.xlsx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.png'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.jpg'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.jpeg' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.jp2'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.webp' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.gif'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.bmp'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'mcp_flash_or_token'; reason_if_unsupported = '' }
-    '.html' = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'html_model_or_env_detected'; reason_if_unsupported = 'Only supported when routed as HTML page/model and environment confirms' }
-    '.htm'  = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'html_model_or_env_detected'; reason_if_unsupported = 'Only supported when routed as HTML page/model and environment confirms' }
+    '.pptx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.xls'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.xlsx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.png'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.jpg'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.jpeg' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.jp2'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.webp' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.gif'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.bmp'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
+    '.html' = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'convert_with_mineru_html'; reason_if_unsupported = 'Only supported when routed as HTML page/model and environment confirms' }
+    '.htm'  = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'convert_with_mineru_html'; reason_if_unsupported = 'Only supported when routed as HTML page/model and environment confirms' }
 }
 
 function Write-PrepareError {
@@ -293,7 +293,7 @@ try {
         $reason = $null
         switch ([string]$capability.supported_for_mineru) {
             'true' {
-                $mineruRoute = 'mcp_flash_or_token'
+                $mineruRoute = 'convert_with_mineru'
                 $reason = $null
             }
             'conditional' {

@@ -377,7 +377,7 @@ try {
     foreach ($item in @($batch.items)) {
         $sourceId = [string]$item.source_id
         $outputDir = Resolve-OutputDirPath -RunDir ([string]$config.RunDir) -OutputDir ([string]$item.output_dir)
-        $outputPath = Join-Path -Path $outputDir -ChildPath 'full.md'
+        $outputPath = Join-Path -Path $outputDir -ChildPath "$sourceId.md"
         $route = if ($MockMode) { 'mock' } else { [string]$item.mineru_route }
         $validationFlags = [System.Collections.Generic.List[string]]::new()
         $errorCode = $null
@@ -416,7 +416,7 @@ try {
         if ($null -eq $errorCode) {
             if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
                 $errorCode = 'mineru_output_missing'
-                $message = 'MinerU output full.md is missing'
+                $message = "MinerU output $sourceId.md is missing"
             } else {
                 $markdown = Get-Content -LiteralPath $outputPath -Raw -Encoding UTF8
                 $contentBytes = [System.Text.Encoding]::UTF8.GetByteCount($markdown)

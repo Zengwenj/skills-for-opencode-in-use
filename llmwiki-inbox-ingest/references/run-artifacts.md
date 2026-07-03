@@ -153,7 +153,7 @@ evidence/
 | `items[].archive_path` | string | 是 | committed archive path |
 | `items[].archive_sha256` | string | 是 | committed archive SHA256 |
 | `items[].extension` | string | 是 | 扩展名 |
-| `items[].mineru_route` | string | 是 | `mcp_flash`、`mcp_token`、`mock`、`skip_unsupported` |
+| `items[].mineru_route` | string | 是 | `convert_with_mineru`、`convert_with_mineru_html`、`mock`、`skip_unsupported` |
 | `items[].output_dir` | string | 是 | `mineru-output/<source_id>/` |
 | `items[].language` | string/null | 否 | OCR 语言提示 |
 | `items[].raw_target_hint` | string | 是 | raw 目标提示路径 |
@@ -169,7 +169,7 @@ evidence/
 | `run_id` | string | 是 | run ID |
 | `archive_path` | string | 是 | committed archive path |
 | `archive_sha256` | string | 是 | archive SHA256 |
-| `route` | string | 是 | `mcp_flash`、`mcp_token`、`mock` |
+| `route` | string | 是 | `convert_with_mineru`、`convert_with_mineru_html`、`mock` |
 | `status` | string | 是 | `parsed`、`failed`、`skipped` |
 | `output_path` | string/null | 是 | MinerU markdown 输出路径 |
 | `content_bytes` | integer | 是 | 输出字节数 |
