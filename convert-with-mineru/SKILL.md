@@ -1,230 +1,159 @@
 ---
 name: convert-with-mineru
-description: Use when converting local documents or directories with MinerU, especially when choosing between precision parsing and multimodal OCR routing, preserving source-based filenames, or routing scanned PDFs and images for quality-gated output.
+description: Use when converting local document directories or files with MinerU precision batch mode, preserving source-based filenames for Markdown and images output with quality gating.
 ---
 
 # Convert With MinerU
 
 ## Overview
 
-把 MinerU 作为本地文档转换主路径，覆盖所有官方支持格式。
+把 MinerU Precision API 作为本地文档批量转换主路径，覆盖所有官方支持格式。
 
 核心原则：
-- MinerU 统一走精准模式（Precision API）。
+- 统一走精准模式（Precision API），非 HTML 使用 `vlm` 模型，HTML/HTM 使用 `MinerU-HTML` 模型。
 - 官方支持格式（`pdf/doc/docx/ppt/pptx/xls/xlsx/html/htm/png/jpg/jpeg/jp2/webp/gif/bmp`）全部走 MinerU。
-- `csv/tsv/json/xml/epub/zip` 明确不支持，路由到 `unsupported`。
+- `csv/tsv/json/xml/epub/zip` 明确不支持（`unsupported`），不委托其他 skill。
 - 不存在、不可读、0-byte 的官方支持格式路由到 `invalid_input`。
-- 最终输出必须按源文件名写出，不把 `full.md` 直接暴露给用户。
+- 正式输出只有 `source.md` + `source.images/`，不产出 JSON。
+- `multimodal_looker` 保留为显式 opt-in 的 LLM 图像识别理解路由（通过 `--prefer-multimodal`）。
 
 ## When To Use
 
 在这些场景使用本技能：
-- 需要把本地 `pdf/doc/docx/ppt/pptx/xls/xlsx/html/htm` 或目录转换成 Markdown。
-- 需要处理官方图片格式 `png/jpg/jpeg/jp2/webp/gif/bmp`。
-- 需要按源文件名保存结果，例如 `report.md`、`report.images/`、`report.json/report.content_list.json`。
-- 需要确定性路由、质量门控与结构化 JSON 输出。
+- 需要把本地 `pdf/doc/docx/ppt/pptx/xls/xlsx/html/htm` 或图片目录批量转成 Markdown。
+- 需要按源文件名保存结果，例如 `report.md`、`report.images/`。
+- 需要确定性路由与质量门控。
 
 在这些场景不要使用本技能：
 - `csv/tsv/json/xml/epub/zip`：本 skill 明确不支持这些格式。
 - 需要高保真处理 Word、PPT：优先 `docx`、`pptx` skill。
-- 少量文件只需 Markdown：优先官方 MCP `mineru_parse_documents`。
+- 需要多格式输出（docx/html/latex）或 URL 网页抓取：参考"排障/底层参考"章节。
 
 ## Quick Reference
 
-| 场景 | 首选 | 备选/说明 |
+| 场景 | 使用方式 | 说明 |
 | --- | --- | --- |
-| `.docx`/`.doc`/`.ppt`/`.pptx`/数字导出 PDF | 本 skill (MinerU 精准模式) | 官方 MCP（少量只需 Markdown 时优先 MCP） |
-| `.xls`/`.xlsx` | 本 skill (MinerU 精准模式) | 官方 API 已支持 Excel |
-| `.html`/`.htm` | 本 skill (`mineru_html` 路由) | MinerU-HTML 模型 |
-| `.png`/`.jpg`/`.jpeg`/`.jp2`/`.webp`/`.gif`/`.bmp` | 本 skill (MinerU 精准模式) | 图片 OCR |
-| 目录批量、需要 `source.json/` 结构化 JSON | 本 skill (MinerU 精准模式) | 无 |
-| 少量文件、只需 Markdown、对话内读取 | 官方 MCP `mineru_parse_documents` | 本 skill |
-| 多格式输出 (docx/html/latex/json) | 官方 MinerU Document Extractor | 无 |
-| URL 网页 crawl | 官方 MinerU Document Extractor `crawl` | 无 |
-| 手写/低质/重复灌词 PDF 或图片 | `multimodal-looker`（通过 `--prefer-multimodal`） | 本 skill 输出 guidance |
+| 目录批量转换 | `python -m scripts.mineru_convert --recursive <folder>` | 非 HTML 使用 `vlm`，HTML/HTM 使用 `MinerU-HTML` |
+| 单文件 | `python -m scripts.mineru_convert <file>` | 同上，无 `--recursive` |
+| 启用审计归档 | 追加 `--audit-dir <path>` | 生成 raw archive、batch manifest、per-file manifest |
+| 手写/低质/重复灌词 PDF 或图片 | 追加 `--prefer-multimodal` | 显式 opt-in，走 `multimodal_looker` 路由 |
+| 外置配置文件 | 追加 `--config <path>` | 参考 `examples/mineru.env` |
 | `csv/tsv/json/xml/epub/zip` | **不支持** | 不委托其他 skill |
 
-## Agent 路由决策
-
-根据需求选择合适的 MinerU 入口，避免所有场景都走同一个工具。
-
-### 路由矩阵（Phase 1）
+## Routes
 
 本 skill 的确定性路由结果为以下五个 canonical route 之一：
 
-| Route | 含义 | 典型文件 |
+| Route | 含义 | 触发条件 |
 | --- | --- | --- |
-| `mineru` | MinerU 精准模式处理 | `.pdf` `.doc` `.docx` `.ppt` `.pptx` `.xls` `.xlsx` `.png` `.jpg` `.jpeg` `.jp2` `.webp` `.gif` `.bmp` |
-| `mineru_html` | MinerU HTML 模型（`model_version="MinerU-HTML"`） | `.html` `.htm` |
-| `multimodal_looker` | 输出多模态 OCR/vision guidance（Phase 1 不真实调用） | 仅 `--prefer-multimodal` 时的 PDF/图片 |
-| `unsupported` | 明确不支持的格式 | `.csv` `.tsv` `.json` `.xml` `.epub` `.zip` 及其他未知扩展名 |
+| `mineru` | MinerU Precision API `vlm` 模型 | 非 HTML 的官方支持格式 |
+| `mineru_html` | MinerU Precision API `MinerU-HTML` 模型 | `.html` `.htm` |
+| `multimodal_looker` | 输出 LLM 图像识别 guidance（不调用外部 API） | `--prefer-multimodal` 时的 PDF/图片 |
+| `unsupported` | 明确不支持的格式 | `.csv` `.tsv` `.json` `.xml` `.epub` `.zip` 等 |
 | `invalid_input` | 文件不存在、不可读或 0-byte | 任何官方支持格式但无法读取 |
-
-### 三路径概览
-
-- **官方 MCP**（`mineru_parse_documents`）：少量文件、只需 Markdown、对话内快速读取。使用 `MINERU_API_TOKEN` 认证。非 HTML 文档省略 `model` 参数，SDK 自动推断为 VLM。
-- **官方 MinerU Document Extractor**（`mineru-open-api` CLI）：多格式输出（docx/html/latex/json）、网页 crawl。使用 `MINERU_TOKEN` 认证。支持 `--model vlm/pipeline/html`。
-- **本 skill（convert-with-mineru）**：本地目录批量、确定性路由（5 canonical routes）、质量门控、稳定源文件名输出、结构化 JSON（`source.md`/`source.json/`/`source.images/`）。使用 `MINERU_TOKEN` 认证。HTML 文件使用 `model_version="MinerU-HTML"`。
-
-### 决策矩阵
-
-| 场景 | 首选工具 | 备选/说明 |
-| --- | --- | --- |
-| 少量 PDF/DOCX/PPTX/XLSX，只需 Markdown | 官方 MCP | 备选: 本 skill（本地批量时） |
-| 本地目录批量转换，需稳定 source.md/source.json 输出 | 本 skill (convert-with-mineru) | 备选: MCP（少量时） |
-| 需要 docx/html/latex/json 多格式输出 | 官方 MinerU Document Extractor / `mineru-open-api extract -f` | 无 |
-| URL 网页解析/crawl | 官方 MinerU Document Extractor / `mineru-open-api crawl` | 无 |
-| 手写/低质/重复灌词 PDF 或图片 | `multimodal-looker`（通过 `--prefer-multimodal`） | 本 skill 输出 guidance |
-| HTML 文件 | 本 skill（`mineru_html` 路由） | MCP（少量时） |
-| 图片 OCR | 本 skill（`mineru` 路由） | MCP（少量时） |
-| CSV/TSV/JSON/XML/EPUB/ZIP | **不支持** | 不委托其他 skill |
-
-### 何时不要调用本 skill
-
-以下场景应优先选择其他工具，而不是本 skill：
-
-- 少量文件 + 只需 Markdown + 对话内读取 → 优先用官方 MCP
-- 需要多格式输出（docx/html/latex）或网页 crawl → 优先用官方 MinerU Document Extractor / CLI
-- `csv/tsv/json/xml/epub/zip` → 本 skill 明确不支持
-
-### Token 认证规则
-
-- **MCP Server** 使用 `MINERU_API_TOKEN`，不是 `MINERU_TOKEN`
-- **CLI/SDK/本 skill** 使用 `MINERU_TOKEN`，不是 `MINERU_API_TOKEN`
-- MCP Precision/VLM 路径必须有 `MINERU_API_TOKEN`；只有 `MINERU_TOKEN` 时不能走 MCP 认证路径
-- MCP 没有 `MINERU_MODEL` 或 `DEFAULT_MODEL` 全局环境变量；不要给 MCP 配置这些不存在的变量
-- **opencode MCP 的 `MINERU_API_TOKEN` 通过 `opencode.json` 的 `mcp.<name>.environment.MINERU_API_TOKEN` 字段配置**（`mcp` 直接子节点，不嵌套 `servers`），与终端 shell 的 `$env:MINERU_API_TOKEN` 是**两个独立空间**。判断 MCP 是否已配置 token，必须读 `opencode.json`，**禁止**用 `$env:MINERU_API_TOKEN` 是否非空来推断——后者只反映当前 shell，永远看不到 MCP server 进程内的 environment。详见 `references/configuration.md` 的"如何检查 opencode MCP 是否已配置 token"。
-
-### 模型选择规则
-
-- 非 HTML 文档调用 MCP 时省略 `model` 参数，SDK 默认推断为 VLM
-- HTML/网页 URL 才显式传 `model="html"`
-- 强制 pipeline 模式才显式传 `model="pipeline"`
 
 ## Output Rules
 
-- `source.pdf` -> `source.md`
-- 精准模式 JSON 可用时 -> `source.json/`
-  - `source.content_list.json`
-  - `source.content_list_v2.json`
-  - `source.layout.json`
-  - `source.model.json`
-  - 仅保存本次解析实际产出的类型
-- 图片资源 -> `source.images/`
-- Per-file manifest -> `source.manifest.json`（记录 source、stem、output_root、batch_id、image_status、image_count、warnings 等）
-- 正式输出目录不暴露 `source.raw/`；完整 MinerU raw 输出归档到外部审计目录 `_review/mineru/<batch_id>/raw/`，由批量 `mineru_manifest.json` 索引
-- 发生重名冲突时使用 `__2`、`__3`
-- 上述命名是本技能对外承诺的稳定 contract，不等于 MinerU 官方原生产物全集；官方可能还有额外中间文件，但默认不直接暴露给用户
+正式输出仅包含以下产物，**不产出任何 JSON**：
+
+- `source.md`：Markdown 正文，图片路径已重写为 `source.images/` 前缀
+- `source.images/`：MinerU 提取的图片资源
+
+不保留 `source.json/`、`content_list*.json`、`layout.json`、`model.json`。
+
+- 重名冲突使用 `__2`、`__3` 后缀。
+- Per-file manifest（`source.manifest.json`）仅在启用 `--audit-dir` 时生成，是审计元数据而非 MinerU 原生 JSON。
+- Raw 归档仅存入外部审计目录 `_review/mineru/<batch_id>/raw/`，不放入正式输出目录。
+
+## Commands
+
+日常入口唯一：
+
+```powershell
+python -m scripts.mineru_convert --recursive <folder>
+```
+
+启用审计归档：
+
+```powershell
+python -m scripts.mineru_convert --audit-dir "C:\audit\mineru" --recursive <folder>
+```
+
+也可通过环境变量 `MINERU_AUDIT_DIR` 或配置文件的 `AUDIT_DIR` 键设置。默认归档路径为 `<output_root>/../_review/mineru/<batch_id>/`。
+
+显式 opt-in LLM 图像识别理解路由：
+
+```powershell
+python -m scripts.mineru_convert --recursive <folder> --prefer-multimodal
+```
+
+`--prefer-multimodal` 将匹配的 PDF/图片路由到 `multimodal_looker`，只输出 guidance（建议使用多模态 LLM 进行图像识别理解），不实际调用外部视觉 API。
+
+`--require-json` 已弃用，仅打印 warning。
 
 ## Config
 
-优先使用环境变量 `MINERU_TOKEN`。
+使用环境变量 `MINERU_TOKEN`（CLI/SDK 共用认证 token）。
 
-### Token 变量差异
+Token 变量差异：
+- 本 skill 和 CLI 使用 `MINERU_TOKEN`。
+- 官方 MCP Server 使用 `MINERU_API_TOKEN`（不同认证体系）。
+- 两者**不能互换**，不要混用。
 
-本 skill 使用 `MINERU_TOKEN`（CLI/SDK 共用）。官方 MCP Server 使用不同的 `MINERU_API_TOKEN`。
-
-- 只用本 skill 或 CLI：配置 `MINERU_TOKEN` 即可。
-- 同时使用 MCP 和本 skill：需要分别配置 `MINERU_API_TOKEN`（MCP）和 `MINERU_TOKEN`（本 skill/CLI）。
-- 不要把 `MINERU_TOKEN` 当作 MCP 的认证变量，反之亦然。
-- MCP 没有 `MINERU_MODEL` 或 `DEFAULT_MODEL` 环境变量；不要尝试配置这些不存在的变量。
-
-配置写法、PowerShell/CMD 设置方式、外置 `mineru.env` / `mineru.json` 示例，见：
+配置写法、外置 `mineru.env` / `mineru.json` 示例，见：
 - `references/configuration.md`
 - `examples/mineru.env`
 - `examples/mineru.json`
 
-本地验证时如果目录里临时留有 `mineru..env` 这类真实配置文件，把它视为隔离对象，而不是示例文件或分发内容。
+本地验证时如果目录里临时留有 `mineru..env` 这类真实配置文件，把它视为隔离对象。
 
-## Commands
+## 排障 / 底层参考
 
-单文件：
+以下工具不在日常推荐路径中，仅在特殊场景参考：
 
-```powershell
-$env:MINERU_TOKEN = "<在这里填写你的 MineU Token>"
-python -m scripts.mineru_convert "C:\docs\report.pdf"
-```
-
-目录批量：
-
-```powershell
-$env:MINERU_TOKEN = "<在这里填写你的 MineU Token>"
-python -m scripts.mineru_convert --recursive "C:\docs\folder"
-```
-
-外置配置文件：
-
-```powershell
-python -m scripts.mineru_convert --config "C:\Users\zengw\.config\opencode\local\mineru.env" "C:\docs\report.pdf"
-```
-
-生成可分发的过滤副本：
-
-```powershell
-python -m scripts.stage_distribution ".\dist\convert-with-mineru"
-```
-
-审计归档目录（可选）：
-
-```powershell
-# 指定外部审计目录（raw archive + batch manifest）
-python -m scripts.mineru_convert --audit-dir "C:\audit\mineru" "C:\docs\report.pdf"
-```
-
-也可通过环境变量或配置文件设置：
-- 环境变量：`MINERU_AUDIT_DIR`
-- 配置文件键：`AUDIT_DIR`（在 `mineru.env` 或 `mineru.json` 中）
-- 默认行为：`<output_root>/../_review/mineru/<batch_id>/`
+| 场景 | 工具 | 说明 |
+| --- | --- | --- |
+| 少量文件 + 对话内快速读取 | 官方 MCP `mineru_parse_documents` | 使用 `MINERU_API_TOKEN`；非 HTML 省略 `model` |
+| 需要 docx/html/latex 等多格式输出 | 官方 MinerU Document Extractor CLI | `mineru-open-api extract -f` |
+| URL 网页解析/crawl | 官方 MinerU Document Extractor `crawl` | 本 skill 只支持本地 `.html/.htm` |
 
 ## Fallback
 
 MinerU 路由矩阵与分流说明见：
 - `references/fallback-routing.md`
 
-质量门控结果记录在 per-file manifest（`source.manifest.json`）的 `warnings` 字段，不改变路由阈值。详见 `references/fallback-routing.md`。
+质量门控结果记录在 per-file manifest 的 `warnings` 字段（需 `--audit-dir`），不改变路由阈值。
 
 脚本级路由规则：
-- `.pdf`/`.doc`/`.docx`/`.ppt`/`.pptx` → `mineru`
-- `.xls`/`.xlsx` → `mineru`（官方 API 已支持）
-- `.html`/`.htm` → `mineru_html`（`model_version="MinerU-HTML"`）
-- `.png`/`.jpg`/`.jpeg`/`.jp2`/`.webp`/`.gif`/`.bmp` → `mineru`
+- `.pdf`/`.doc`/`.docx`/`.ppt`/`.pptx`/`.xls`/`.xlsx` → `mineru`（`vlm` 模型）
+- `.html`/`.htm` → `mineru_html`（`MinerU-HTML` 模型）
+- `.png`/`.jpg`/`.jpeg`/`.jp2`/`.webp`/`.gif`/`.bmp` → `mineru`（`vlm` 模型）
 - `.csv`/`.tsv`/`.json`/`.xml`/`.epub`/`.zip` → `unsupported`
 - 不存在/不可读/0-byte → `invalid_input`
 - `--prefer-multimodal` 时的 PDF/图片 → `multimodal_looker`（guidance-only）
 
 ## Known Issues
 
-- SDK 超时：部分大文件转换可能触发 MinerU SDK 超时（benchmark 中 3/12 案例），重试通常有效
-- 乱码 (mojibake)：个别文件出现编码乱码（benchmark 中 3/9 案例），根因待排查
-- PPTX 双路径：当前 PPTX 走 MinerU 精准模式，未来可能增加本地解析路径
+- SDK 超时：大文件可能触发 MinerU SDK 超时，重试通常有效
+- 乱码 (mojibake)：个别文件编码问题，根因待排查
 
 ## Common Mistakes
 
-- 直接把 ZIP 里的 `full.md` 当最终产物
-- 让 `.md` 继续引用 `images/...`，却把图片目录改名成 `source.images/`
-- 把所有结构化结果压成单个 `source.json`
-- 漏写 `source.content_list_v2.json` 这类 MinerU 实际产出的 JSON 类型
-- 把 `source.json/` 误说成官方完整 JSON 全量输出
-- 在示例里写入真实 token
-- 把 `xls/xlsx` 当作不支持（官方 API 已支持 Excel）
+- 期望 JSON 输出（本 skill 正式输出不含 JSON，`--require-json` 已弃用）
 - 把 `MINERU_API_TOKEN` 和 `MINERU_TOKEN` 混用（MCP 用前者，本 skill/CLI 用后者，不能互换）
-- 给 MCP 配置 `MINERU_MODEL` 或 `DEFAULT_MODEL`（这些变量不存在，MCP 通过 `model` 参数控制模型）
-- URL 网页解析走本 skill（应走官方 MinerU Document Extractor 的 `crawl`）
-- 需要多格式输出却走本 skill（本 skill 只输出 Markdown + JSON + 图片；多格式用官方 CLI `extract -f`）
-- 少量文件只需 Markdown 却走本 skill（优先用官方 MCP，更简单直接）
+- 把 `xls/xlsx` 当作不支持（官方 API 已支持 Excel）
 - 尝试用本 skill 处理 `csv/tsv/json/xml/epub/zip`（明确不支持）
 - 手写/低质/重复灌词场景不使用 `--prefer-multimodal` 导致输出质量差
-- 通过 `$env:MINERU_API_TOKEN` 检查 opencode MCP 是否已配置 token（错误：MCP server 的 environment 在 `opencode.json` 的 `mcp.<name>.environment.MINERU_API_TOKEN`（`mcp` 直接子节点），与 shell 环境变量独立；shell 检查永远看不到 MCP 进程内的值，会误判为 Flash 模式）
-- 把 raw 审计归档当成正式输出的一部分（raw 只在 `_review` 审计目录，不放入正式输出目录）
-- 期望 `source.manifest.json` 是 MinerU 原生 JSON（manifest 是本 skill 生成的审计元数据，不是 MinerU API 返回的原始 JSON）
-- 图片缺失时自动重试或降级（本 skill 只记录 `image_status` + WARNING，不实现重试或自动降级路由）
+- 直接把 ZIP 里的 `full.md` 当最终产物
+- 让 `.md` 继续引用 `images/...`，却把图片目录改名成 `source.images/`
+- 通过 `$env:MINERU_API_TOKEN` 检查 opencode MCP 是否已配置 token（MCP environment 在 `opencode.json` 中，与 shell 环境变量独立）
+- 把 raw 审计归档当成正式输出的一部分（raw 只在 `_review` 审计目录）
+- 期望 `source.manifest.json` 是 MinerU 原生 JSON（manifest 是本 skill 生成的审计元数据，仅 `--audit-dir` 时存在）
 
 ## Red Flags
 
 - "MineU 不支持也许也能跑"
 - "没有 JSON 我就生成一个空 JSON"
-- "把 token 写进配置示例里更方便"
-- "多模态转写出来的东西也算 MinerU JSON"
 - "Excel 不支持所以跳过"
 - "图片应该走 multimodal-looker 默认"
 

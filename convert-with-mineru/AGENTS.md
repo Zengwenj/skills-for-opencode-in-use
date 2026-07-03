@@ -11,13 +11,13 @@
 - HTML/HTM 走 `mineru_html`（`model_version="MinerU-HTML"`）
 - 输出必须按源文件名命名，不暴露 `full.md`
 
-## Canonical Routes (Phase 1)
+## Canonical Routes (Phase 2)
 
 | Route | 含义 |
 | --- | --- |
-| `mineru` | MinerU 精准模式 |
-| `mineru_html` | MinerU HTML 模型 |
-| `multimodal_looker` | 多模态 guidance（`--prefer-multimodal` 时） |
+| `mineru` | MinerU 精准模式，非 HTML 使用 vlm 模型 |
+| `mineru_html` | MinerU HTML 模型（`model_version="MinerU-HTML"`）|
+| `multimodal_looker` | 多模态 vision guidance，显式 opt-in（`--prefer-multimodal`）|
 | `unsupported` | 明确不支持的格式 |
 | `invalid_input` | 文件不存在/不可读/0-byte |
 
@@ -26,7 +26,7 @@
 ```
 scripts/
 ├── mineru_convert.py       ← CLI 入口 (python -m scripts.mineru_convert)
-│   ├── build_parser()      ← argparse: inputs, --recursive, --require-json, --output-root, --config, --prefer-multimodal
+│   ├── build_parser()      ← argparse: inputs, --recursive, --output-root, --config, --prefer-multimodal, --require-json (弃用)
 │   ├── default_output_root()  ← 输出目录推断逻辑
 │   └── print_fallback_guidance()  ← unsupported/invalid_input 提示
 ├── mineru_config.py        ← 配置加载
@@ -62,8 +62,8 @@ scripts/
 ## 输出契约
 
 - `source.pdf` → `source.md`
-- `source.pdf` → `source.json/` (content_list, content_list_v2, layout, model — 仅保存实际产出)
 - `source.pdf` → `source.images/`
+- 正式输出只包含 `source.md` 和 `source.images/`（md/images-only），不保留 `.json` 文件
 - 不保留 `source.raw/` 或中间副本
 - 重名时用 `__2`, `__3` 后缀
 
@@ -78,9 +78,9 @@ pytest
 - `test_config_loading.py` — 配置加载各路径
 - `test_input_discovery.py` — 文件发现与排除
 - `test_mode_selection.py` — 路由决策（5 canonical routes）
-- `test_precision_flow.py` — 精准模式转换流程
-- `test_lightweight_flow.py` — CLI 行为测试
-- `test_output_mapping.py` — 输出路径映射
+- `test_precision_flow.py` — 精准模式转换流程（vlm/MinerU-HTML batch，无 JSON 输出断言）
+- `test_lightweight_flow.py` — CLI 行为测试（`--require-json` 仅打印弃用 warning）
+- `test_output_mapping.py` — 输出路径映射（md/images-only）
 - `test_quality_gates.py` — 质量门控测试
 - `test_distribution_staging.py` — 分发打包
 
@@ -100,7 +100,8 @@ pytest
 
 - 把 ZIP 里的 `full.md` 当最终产物
 - `.md` 引用 `images/...` 但图片目录改名为 `source.images/`
-- 把所有 JSON 压成单个 `source.json`
+- 期望 `source.json` 或 `source.json/` 目录作为正式输出（Phase 2 后已移除，正式输出仅 md/images-only）
 - 把 `xls/xlsx` 当作不支持（官方 API 已支持）
 - `csv/tsv/json/xml/epub/zip` 尝试用本 skill 处理（明确不支持）
 - 混用 `MINERU_TOKEN`（本 skill）和 `MINERU_API_TOKEN`（MCP）
+- 依赖 `--require-json` 做 JSON 输出检查（已弃用，仅打印 warning，不做门控）

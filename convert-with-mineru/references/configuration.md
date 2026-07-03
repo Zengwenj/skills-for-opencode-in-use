@@ -78,20 +78,23 @@ MINERU_AUDIT_DIR=
 
 ## Token 变量差异
 
-MinerU 生态中有两个不同的 token 变量，分别用于不同工具：
+MinerU 生态中有两个不同的 token 变量，分别用于不同工具。本 skill 仅需要 `MINERU_TOKEN`，不涉及 MCP：
 
 | 变量 | 适用工具 | 说明 |
 | --- | --- | --- |
-| `MINERU_TOKEN` | 本 skill、`mineru-open-api` CLI、Python/Go SDK | 命令行和 SDK 认证 |
+| `MINERU_TOKEN` | **本 skill**、`mineru-open-api` CLI、Python/Go SDK | 命令行和 SDK 认证 |
+
+以下为排障参考（非日常使用）：
+
+| 变量 | 适用工具 | 说明 |
+| --- | --- | --- |
 | `MINERU_API_TOKEN` | 官方 MCP Server（`mineru-open-mcp`） | Agent 对话内工具调用认证 |
 
 规则：
-- 只用本 skill 或 CLI：配置 `MINERU_TOKEN` 即可。
-- 只用官方 MCP：配置 `MINERU_API_TOKEN` 即可。
-- 同时使用两者：需要分别配置两个变量，值通常相同但不能互换变量名。
+- 使用本 skill：只需配置 `MINERU_TOKEN`。
+- 使用官方 MCP：需配置 `MINERU_API_TOKEN`（两个值通常相同但不能互换变量名）。
 - 不要把 `MINERU_TOKEN` 写进 MCP 的配置，反之亦然。
-
-MCP Precision/VLM 路径以 `MINERU_API_TOKEN` 为认证前提。如果只有 `MINERU_TOKEN` 而没有 `MINERU_API_TOKEN`，MCP 无法使用 Precision/VLM 路径；此时应使用本 skill 或官方 CLI（它们使用 `MINERU_TOKEN`），或先补配 `MINERU_API_TOKEN`。
+- MCP/官方 CLI 不是本 skill 的日常路径；若需要 MCP Precision/VLM 能力，应先补配 `MINERU_API_TOKEN`。
 
 ### 如何检查 opencode MCP 是否已配置 token
 
@@ -126,11 +129,18 @@ Get-Content "$env:USERPROFILE\.config\opencode\opencode.json" |
 
 这些变量只在本 skill 中有效，不是 MCP 配置项。
 
-**注意**：本 skill 硬限制为仅精准模式（Precision API），不支持 mode 切换。`mineru.env` 里的 `DEFAULT_MODE` 字段（如 `precision`/`vlm`/`pipeline`）会被 `Settings` 忽略——所有路径都走精准 API，无需也无法通过配置改变。
+**注意**：本 skill 硬限制为仅精准模式（Precision API），不支持模式切换。`mineru.env` 里的 `DEFAULT_MODE` 字段（如 `precision`/`vlm`/`pipeline`）会被 `Settings` 忽略。所有路径都走 Precision API：非 HTML 使用 vlm 模型，HTML/HTM 使用 MinerU-HTML 模型，无需也无法通过配置改变。
 
 ## 模型选择规则
 
-### MCP 模型参数
+### 本 skill 模型行为
+
+本 skill 通过 SDK 的 `client.extract_batch()` 调用 Precision API，显式传递 `model_version` 参数：
+- 非 HTML 文件（PDF、DOCX、PPTX、图片等）→ `model_version="vlm"`
+- HTML/HTM 文件 → `model_version="MinerU-HTML"`
+- 混合输入按模型自动分批
+
+### MCP 模型参数（排障参考）
 
 官方 MCP 的 `parse_documents` 工具接受可选的 `model` 参数：
 
@@ -141,14 +151,6 @@ Get-Content "$env:USERPROFILE\.config\opencode\opencode.json" |
 | 强制传统流水线 | `"pipeline"` | 不使用 VLM，零幻觉但精度较低 |
 
 **不要给 MCP 配置 `MINERU_MODEL` 或 `DEFAULT_MODEL` 环境变量**——这些变量在官方 MCP 中不存在。模型选择通过 `model` 参数在调用时控制。
-
-### 本 skill 模型行为
-
-本 skill 当前通过 SDK 的 `client.extract()` 调用 Precision API，未显式传递 `model` 参数。SDK 自动推断规则：
-- 非 HTML 文件 → 使用 VLM 模型
-- HTML/HTM 文件 → 使用 MinerU-HTML 模型
-
-这意味着本 skill 的非 HTML 解析默认已使用 VLM，无需额外配置。
 
 ## 禁止项
 
