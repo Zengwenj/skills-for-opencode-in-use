@@ -110,6 +110,265 @@ function Assert-FileContains {
     }
 }
 
+function Test-FixtureJsonProperty {
+    param(
+        [Parameter(Mandatory = $true)][object]$Object,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    return $null -ne $Object.PSObject.Properties[$Name]
+}
+
+function Get-FixtureJsonPropertyValue {
+    param(
+        [Parameter(Mandatory = $true)][object]$Object,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Get-MineruBatchItemLabel {
+    param([Parameter(Mandatory = $true)][object]$Item)
+
+    $sourceId = Get-FixtureJsonPropertyValue -Object $Item -Name 'source_id'
+    if ([string]::IsNullOrWhiteSpace([string]$sourceId)) { return '<missing-source-id>' }
+    return [string]$sourceId
+}
+
+function Assert-NullOrMissingRouteField {
+    param(
+        [Parameter(Mandatory = $true)][object]$Item,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if ((Test-FixtureJsonProperty -Object $Item -Name $Name) -and $null -ne (Get-FixtureJsonPropertyValue -Object $Item -Name $Name)) {
+        throw "mineru-batch item $Label expected $Name to be null or missing"
+    }
+}
+
+function Assert-RequiredRouteField {
+    param(
+        [Parameter(Mandatory = $true)][object]$Item,
+        [Parameter(Mandatory = $true)][string]$Name,
+        [Parameter(Mandatory = $true)][object]$Expected,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if (-not (Test-FixtureJsonProperty -Object $Item -Name $Name)) {
+        throw "mineru-batch item $Label missing required $Name"
+    }
+
+    $actual = Get-FixtureJsonPropertyValue -Object $Item -Name $Name
+    if ($actual -ne $Expected) {
+        throw "mineru-batch item $Label expected $Name '$Expected' but got '$actual'"
+    }
+}
+
+function Assert-ForbiddenProcessors {
+    param(
+        [Parameter(Mandatory = $true)][object]$Item,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    if (-not (Test-FixtureJsonProperty -Object $Item -Name 'forbidden_processors')) {
+        throw "mineru-batch item $Label missing required forbidden_processors"
+    }
+
+    $values = @(Get-FixtureJsonPropertyValue -Object $Item -Name 'forbidden_processors')
+    if ($values.Count -eq 0) {
+        throw "mineru-batch item $Label forbidden_processors must be a non-empty array"
+    }
+
+    foreach ($required in @('mcp', 'agent_lightweight_api', 'flash', 'pipeline')) {
+        if ($values -notcontains $required) {
+            throw "mineru-batch item $Label forbidden_processors missing '$required'"
+        }
+    }
+}
+
+function Assert-MineruBatchRouteItem {
+    param([Parameter(Mandatory = $true)][object]$Item)
+
+    $label = Get-MineruBatchItemLabel -Item $Item
+    $allowedProcessors = @('convert_with_mineru', 'convert_with_mineru_html', 'lifecycle_runner', 'multimodal_looker', 'mock', 'skip_unsupported')
+
+    if ((Test-FixtureJsonProperty -Object $Item -Name 'model_version') -and (Get-FixtureJsonPropertyValue -Object $Item -Name 'model_version') -eq 'pipeline') {
+        throw "mineru-batch item $label must not use model_version 'pipeline'"
+    }
+
+    if (-not (Test-FixtureJsonProperty -Object $Item -Name 'processor')) {
+        $legacyRoute = Get-FixtureJsonPropertyValue -Object $Item -Name 'mineru_route'
+        if ($legacyRoute -eq 'mock' -or $legacyRoute -eq 'skip_unsupported') { return }
+        throw "mineru-batch item $label missing required processor"
+    }
+
+    $processor = [string](Get-FixtureJsonPropertyValue -Object $Item -Name 'processor')
+    if ($allowedProcessors -notcontains $processor) {
+        throw "mineru-batch item $label has unsupported processor '$processor'"
+    }
+
+    if ($processor -eq 'convert_with_mineru' -or $processor -eq 'convert_with_mineru_html' -or $processor -eq 'lifecycle_runner') {
+        $expectedModel = if ($processor -eq 'convert_with_mineru_html') { 'MinerU-HTML' } else { 'vlm' }
+        Assert-RequiredRouteField -Item $Item -Name 'api_family' -Expected 'precision_api' -Label $label
+        Assert-RequiredRouteField -Item $Item -Name 'model_version' -Expected $expectedModel -Label $label
+        Assert-RequiredRouteField -Item $Item -Name 'requires_token_env' -Expected 'MINERU_TOKEN' -Label $label
+        Assert-ForbiddenProcessors -Item $Item -Label $label
+        return
+    }
+
+    Assert-NullOrMissingRouteField -Item $Item -Name 'api_family' -Label $label
+    Assert-NullOrMissingRouteField -Item $Item -Name 'model_version' -Label $label
+    Assert-NullOrMissingRouteField -Item $Item -Name 'requires_token_env' -Label $label
+
+    if ($processor -eq 'multimodal_looker') {
+        Assert-ForbiddenProcessors -Item $Item -Label $label
+    }
+}
+
+function Assert-MineruBatchRouteSchema {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    Assert-FileExists -Path $Path -Label 'mineru-batch.json'
+    $batch = Get-Content -LiteralPath $Path -Raw -Encoding UTF8 | ConvertFrom-Json
+    if (-not (Test-FixtureJsonProperty -Object $batch -Name 'items')) {
+        throw "mineru-batch missing items array: $Path"
+    }
+    foreach ($field in @('state_path', 'polling_budget_seconds', 'output_stem_mapping', 'quality_gate_policy')) {
+        if (-not (Test-FixtureJsonProperty -Object $batch -Name $field)) {
+            throw "mineru-batch missing lifecycle root field $field"
+        }
+    }
+    if ([string]::IsNullOrWhiteSpace([string]$batch.state_path) -or -not ([string]$batch.state_path).EndsWith('lifecycle-state.jsonl', [System.StringComparison]::Ordinal)) {
+        throw "mineru-batch state_path must point to lifecycle-state.jsonl"
+    }
+    if ([int]$batch.polling_budget_seconds -le 0) {
+        throw "mineru-batch polling_budget_seconds must be positive"
+    }
+    if ([string]$batch.output_stem_mapping.markdown -ne '<source_id>.md') {
+        throw "mineru-batch output_stem_mapping.markdown must be <source_id>.md"
+    }
+    if ([string]$batch.quality_gate_policy.pending_stub.status -ne 'pending_stub') {
+        throw "mineru-batch quality_gate_policy must document pending_stub"
+    }
+    if ([string]$batch.quality_gate_policy.missing_heading_contentful.status -ne 'missing_heading_contentful') {
+        throw "mineru-batch quality_gate_policy must document missing_heading_contentful"
+    }
+
+    foreach ($item in @($batch.items)) {
+        Assert-MineruBatchRouteItem -Item $item
+    }
+}
+
+function Assert-RouteAssertionThrows {
+    param(
+        [Parameter(Mandatory = $true)][scriptblock]$Body,
+        [Parameter(Mandatory = $true)][string]$Label
+    )
+
+    try {
+        & $Body
+    } catch {
+        return
+    }
+
+    throw "expected MinerU route assertion failure for $Label"
+}
+
+function Assert-MineruBatchRouteAssertionsRejectInvalidItems {
+    $forbidden = @('mcp', 'agent_lightweight_api', 'flash', 'pipeline')
+
+    $missingApiFamily = [pscustomobject]@{
+        source_id             = 'fixture_missing_api_family'
+        processor             = 'convert_with_mineru'
+        model_version         = 'vlm'
+        requires_token_env    = 'MINERU_TOKEN'
+        forbidden_processors  = $forbidden
+    }
+    Assert-RouteAssertionThrows -Label 'missing api_family' -Body { Assert-MineruBatchRouteItem -Item $missingApiFamily }
+
+    $pipelineModel = [pscustomobject]@{
+        source_id             = 'fixture_pipeline_model'
+        processor             = 'convert_with_mineru'
+        api_family            = 'precision_api'
+        model_version         = 'pipeline'
+        requires_token_env    = 'MINERU_TOKEN'
+        forbidden_processors  = $forbidden
+    }
+    Assert-RouteAssertionThrows -Label 'model_version pipeline' -Body { Assert-MineruBatchRouteItem -Item $pipelineModel }
+}
+
+function Get-MineruBatch {
+    param([Parameter(Mandatory = $true)][object]$Workspace)
+
+    $batchPath = Join-Path -Path ([string]$Workspace.RunDir) -ChildPath 'mineru-batch.json'
+    Assert-FileExists -Path $batchPath -Label 'mineru-batch.json'
+    return Get-Content -LiteralPath $batchPath -Raw -Encoding UTF8 | ConvertFrom-Json
+}
+
+function Get-SingleMineruBatchItem {
+    param([Parameter(Mandatory = $true)][object]$Workspace)
+
+    $batch = Get-MineruBatch -Workspace $Workspace
+    $items = @($batch.items)
+    if ($items.Count -ne 1) { throw "expected exactly one mineru-batch item, found $($items.Count)" }
+    return $items[0]
+}
+
+function Write-FixtureLifecycleState {
+    param(
+        [Parameter(Mandatory = $true)][object]$Workspace,
+        [Parameter(Mandatory = $true)][string]$SourceId,
+        [Parameter(Mandatory = $true)][string]$Status,
+        [string]$NextAction = ''
+    )
+
+    $statePath = Join-Path -Path ([string]$Workspace.RunDir) -ChildPath 'lifecycle-state.jsonl'
+    $record = [ordered]@{
+        source_id = $SourceId
+        batch_id = 'fixture-batch'
+        task_id = 'fixture-task'
+        status = $Status
+    }
+    if (-not [string]::IsNullOrWhiteSpace($NextAction)) {
+        $record.next_action = $NextAction
+    }
+    Write-FixtureFile -Path $statePath -Content ($record | ConvertTo-Json -Compress -Depth 6)
+}
+
+function Write-FixtureMineruOutput {
+    param(
+        [Parameter(Mandatory = $true)][object]$Workspace,
+        [Parameter(Mandatory = $true)][string]$SourceId,
+        [Parameter(Mandatory = $true)][string]$Markdown
+    )
+
+    $outputDir = Join-Path -Path ([string]$Workspace.RunDir) -ChildPath (Join-Path -Path 'mineru-output' -ChildPath $SourceId)
+    New-Item -ItemType Directory -Path $outputDir -Force | Out-Null
+    Write-FixtureFile -Path (Join-Path -Path $outputDir -ChildPath "$SourceId.md") -Content $Markdown
+}
+
+function Initialize-PreparedMineruRun {
+    param([Parameter(Mandatory = $true)][object]$Workspace)
+
+    Initialize-HappyPathSource -Workspace $Workspace | Out-Null
+    Invoke-ScanAndProposal -Workspace $Workspace
+    Approve-FixtureRun -Workspace $Workspace | Out-Null
+
+    $apply = Invoke-SkillScript -ScriptName 'apply-approved-plan.ps1' -Workspace $Workspace
+    Assert-ExitCode -Result $apply -Expected 0 -Step 'apply-approved-plan'
+
+    $batch = Invoke-SkillScript -ScriptName 'prepare-mineru-batch.ps1' -Workspace $Workspace
+    Assert-ExitCode -Result $batch -Expected 0 -Step 'prepare-mineru-batch'
+
+    $evidenceDir = Join-Path -Path ([string]$Workspace.RunDir) -ChildPath 'evidence'
+    New-Item -ItemType Directory -Path $evidenceDir -Force | Out-Null
+    Write-FixtureFile -Path (Join-Path -Path $evidenceDir -ChildPath 'fixture.md') -Content '# Fixture evidence'
+}
+
 function Initialize-HappyPathSource {
     param([Parameter(Mandatory = $true)][object]$Workspace)
 

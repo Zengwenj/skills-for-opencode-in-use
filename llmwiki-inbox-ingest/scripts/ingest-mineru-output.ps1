@@ -33,6 +33,8 @@ $script:ErrorPlaceholders = @(
     'failed to parse',
     '解析失败'
 )
+$script:PendingLifecycleStatuses = @('prepared', 'submitted', 'uploaded', 'waiting-file', 'pending', 'running', 'converting', 'pending_timeout', 'stale_pending')
+$script:NonTerminalStatuses = @('pending', 'pending_stub', 'missing_heading_contentful')
 
 function Write-IngestError {
     param(
@@ -108,6 +110,54 @@ function Read-FailureRows {
                 [string]::IsNullOrWhiteSpace([string]$_.stage) -and
                 [string]::IsNullOrWhiteSpace([string]$_.error_code))
         })
+}
+
+function Get-ObjectPropertyValue {
+    param(
+        [AllowNull()][object]$Object,
+        [Parameter(Mandatory = $true)][string]$Name
+    )
+
+    if ($null -eq $Object) { return $null }
+    $property = $Object.PSObject.Properties[$Name]
+    if ($null -eq $property) { return $null }
+    return $property.Value
+}
+
+function Resolve-RunArtifactPath {
+    param(
+        [Parameter(Mandatory = $true)][string]$RunDir,
+        [AllowNull()][string]$Path,
+        [Parameter(Mandatory = $true)][string]$DefaultLeaf
+    )
+
+    if ([string]::IsNullOrWhiteSpace($Path)) {
+        return [System.IO.Path]::GetFullPath((Join-Path -Path $RunDir -ChildPath $DefaultLeaf))
+    }
+
+    $candidate = $Path.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+    if ([System.IO.Path]::IsPathRooted($candidate)) {
+        return [System.IO.Path]::GetFullPath($candidate)
+    }
+
+    return [System.IO.Path]::GetFullPath((Join-Path -Path $RunDir -ChildPath $candidate.TrimStart('.', [System.IO.Path]::DirectorySeparatorChar, [System.IO.Path]::AltDirectorySeparatorChar)))
+}
+
+function Read-LifecycleStatesBySourceId {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $states = @{}
+    if (-not (Test-Path -LiteralPath $Path -PathType Leaf)) { return $states }
+
+    foreach ($line in Get-Content -LiteralPath $Path -Encoding UTF8) {
+        if ([string]::IsNullOrWhiteSpace($line)) { continue }
+        $record = $line | ConvertFrom-Json
+        $sourceId = [string](Get-ObjectPropertyValue -Object $record -Name 'source_id')
+        if ([string]::IsNullOrWhiteSpace($sourceId)) { continue }
+        $states[$sourceId] = $record
+    }
+
+    return $states
 }
 
 function Write-FailureRows {
@@ -296,6 +346,70 @@ function Test-ErrorPlaceholder {
     return $false
 }
 
+function Test-PendingStubMarkdown {
+    param(
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $true)][string]$SourceId,
+        [Parameter(Mandatory = $true)][int]$ContentBytes
+    )
+
+    $normalized = ($Text -replace "`r`n", "`n" -replace "`r", "`n").TrimEnd()
+    $expectedWithHeading = "# $SourceId`n`nMinerU processing pending - file not yet parsed."
+    if ($normalized.Equals($expectedWithHeading, [System.StringComparison]::Ordinal)) { return $true }
+    if ($normalized.Equals('MinerU processing pending - file not yet parsed.', [System.StringComparison]::Ordinal)) { return $true }
+    return ($ContentBytes -le 128 -and $normalized.Contains('MinerU processing pending - file not yet parsed.'))
+}
+
+function Test-PendingLifecycleStatus {
+    param([AllowNull()][string]$Status)
+    return -not [string]::IsNullOrWhiteSpace($Status) -and $script:PendingLifecycleStatuses -contains $Status
+}
+
+function Get-NextActionForStatus {
+    param(
+        [Parameter(Mandatory = $true)][string]$Status,
+        [AllowNull()][string]$LifecycleNextAction
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($LifecycleNextAction)) { return $LifecycleNextAction }
+
+    switch ($Status) {
+        'pending' { return 'resume the lifecycle runner or extend polling_budget_seconds before raw ingest' }
+        'pending_stub' { return 'resubmit this source with the lifecycle runner or extend the poll timeout; do not ingest the stub' }
+        'missing_heading_contentful' { return 'review or normalize the Markdown heading before writing to raw sources' }
+        'quality_failed' { return 'regenerate MinerU output or inspect the quality flags before raw ingest' }
+        default { return 'regenerate MinerU output for this committed archive or remove it from the batch after review' }
+    }
+}
+
+function Get-ParseStatusForError {
+    param([AllowNull()][string]$ErrorCode)
+
+    if ([string]::IsNullOrWhiteSpace($ErrorCode)) { return 'parsed' }
+    if ($ErrorCode -in @('pending', 'pending_stub', 'missing_heading_contentful', 'quality_failed')) { return $ErrorCode }
+    return 'failed'
+}
+
+function Get-RawStatusForError {
+    param([AllowNull()][string]$ErrorCode)
+
+    if ([string]::IsNullOrWhiteSpace($ErrorCode)) { return 'written' }
+    if ($ErrorCode -in @('pending', 'pending_stub', 'missing_heading_contentful', 'quality_failed')) { return $ErrorCode }
+    return 'failed'
+}
+
+function Get-FailureStage {
+    param([Parameter(Mandatory = $true)][string]$ErrorCode)
+
+    if ($ErrorCode -in @('quality_failed', 'missing_heading_contentful', 'raw_path_escape')) { return 'raw' }
+    return 'mineru'
+}
+
+function Test-RetryableError {
+    param([Parameter(Mandatory = $true)][string]$ErrorCode)
+    return $ErrorCode -in @('pending', 'pending_stub', 'mineru_output_missing', 'quality_failed')
+}
+
 function New-MockMarkdown {
     param(
         [Parameter(Mandatory = $true)][object]$BatchItem,
@@ -364,6 +478,9 @@ try {
     }
 
     $batch = Get-Content -LiteralPath $batchPath -Raw -Encoding UTF8 | ConvertFrom-Json
+    $statePathValue = [string](Get-ObjectPropertyValue -Object $batch -Name 'state_path')
+    $lifecycleStatePath = Resolve-RunArtifactPath -RunDir ([string]$config.RunDir) -Path $statePathValue -DefaultLeaf 'lifecycle-state.jsonl'
+    $lifecycleStates = Read-LifecycleStatesBySourceId -Path $lifecycleStatePath
     $applyEntries = @(Read-JsonlObjects -Path $applyManifestPath)
     $planItems = @(Read-JsonlObjects -Path $classificationPlanPath)
     $latestApply = Get-LatestApplyEntriesBySourceId -ApplyEntries $applyEntries
@@ -372,7 +489,11 @@ try {
     $parseRows = [System.Collections.Generic.List[object]]::new()
     $rawRows = [System.Collections.Generic.List[object]]::new()
     $failureRows = [System.Collections.Generic.List[object]]::new()
-    foreach ($row in @(Read-FailureRows -Path $failuresPath)) { $failureRows.Add($row) }
+    $batchSourceIds = @($batch.items | ForEach-Object { [string]$_.source_id })
+    foreach ($row in @(Read-FailureRows -Path $failuresPath)) {
+        if ($batchSourceIds -contains [string]$row.source_id -and [string]$row.stage -in @('mineru', 'raw')) { continue }
+        $failureRows.Add($row)
+    }
 
     foreach ($item in @($batch.items)) {
         $sourceId = [string]$item.source_id
@@ -382,6 +503,7 @@ try {
         $validationFlags = [System.Collections.Generic.List[string]]::new()
         $errorCode = $null
         $message = ''
+        $nextAction = ''
 
         if (-not $latestApply.ContainsKey($sourceId)) {
             $errorCode = 'source_id_mismatch'
@@ -402,6 +524,9 @@ try {
 
         $applyEntry = if ($latestApply.ContainsKey($sourceId)) { $latestApply[$sourceId] } else { $null }
         $planItem = if ($planBySourceId.ContainsKey($sourceId)) { $planBySourceId[$sourceId] } else { $null }
+        $lifecycleState = if ($lifecycleStates.ContainsKey($sourceId)) { $lifecycleStates[$sourceId] } else { $null }
+        $lifecycleStatus = [string](Get-ObjectPropertyValue -Object $lifecycleState -Name 'status')
+        $lifecycleNextAction = [string](Get-ObjectPropertyValue -Object $lifecycleState -Name 'next_action')
 
         if ($null -eq $errorCode -and $MockMode) {
             if (-not (Test-Path -LiteralPath $outputDir -PathType Container)) {
@@ -415,19 +540,38 @@ try {
         $hasHeading = $false
         if ($null -eq $errorCode) {
             if (-not (Test-Path -LiteralPath $outputPath -PathType Leaf)) {
-                $errorCode = 'mineru_output_missing'
-                $message = "MinerU output $sourceId.md is missing"
+                if (Test-PendingLifecycleStatus -Status $lifecycleStatus) {
+                    $errorCode = 'pending'
+                    $message = "MinerU lifecycle state is $lifecycleStatus; output has not been downloaded yet"
+                    $nextAction = Get-NextActionForStatus -Status 'pending' -LifecycleNextAction $lifecycleNextAction
+                } else {
+                    $errorCode = 'mineru_output_missing'
+                    $message = "MinerU output $sourceId.md is missing"
+                    $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $null
+                }
             } else {
                 $markdown = Get-Content -LiteralPath $outputPath -Raw -Encoding UTF8
                 $contentBytes = [System.Text.Encoding]::UTF8.GetByteCount($markdown)
                 $hasHeading = Test-MarkdownHeading -Text $markdown
-                if ($contentBytes -le 500) { $validationFlags.Add('content_bytes_le_500') }
-                if (-not $hasHeading) { $validationFlags.Add('missing_heading') }
-                if (Test-ErrorPlaceholder -Text $markdown) { $validationFlags.Add('error_placeholder') }
+                if (Test-PendingStubMarkdown -Text $markdown -SourceId $sourceId -ContentBytes $contentBytes) {
+                    $validationFlags.Add('pending_stub')
+                    $errorCode = 'pending_stub'
+                    $message = 'MinerU markdown is the pending placeholder stub, not a parsed output'
+                    $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $lifecycleNextAction
+                } else {
+                    if ($contentBytes -le 500) { $validationFlags.Add('content_bytes_le_500') }
+                    if (-not $hasHeading) { $validationFlags.Add('missing_heading') }
+                    if (Test-ErrorPlaceholder -Text $markdown) { $validationFlags.Add('error_placeholder') }
 
-                if ($validationFlags.Count -gt 0) {
-                    $errorCode = 'raw_quality_failed'
-                    $message = 'MinerU markdown failed raw quality gate: ' + ($validationFlags -join ';')
+                    if ($contentBytes -gt 500 -and -not $hasHeading -and -not (Test-ErrorPlaceholder -Text $markdown)) {
+                        $errorCode = 'missing_heading_contentful'
+                        $message = 'MinerU markdown has content but no Markdown heading; route to normalization review'
+                        $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $null
+                    } elseif ($validationFlags.Count -gt 0) {
+                        $errorCode = 'quality_failed'
+                        $message = 'MinerU markdown failed raw quality gate: ' + ($validationFlags -join ';')
+                        $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $null
+                    }
                 }
             }
         }
@@ -471,13 +615,14 @@ try {
             }
         }
 
+        $parseStatus = Get-ParseStatusForError -ErrorCode $errorCode
         $parseRows.Add([ordered]@{
                 source_id        = $sourceId
                 run_id           = [string]$config.RunId
                 archive_path     = Convert-ToStablePath -Path ([string]$item.archive_path)
                 archive_sha256   = ([string]$item.archive_sha256).ToLowerInvariant()
                 route            = $route
-                status           = if ($null -eq $errorCode) { 'parsed' } else { 'failed' }
+                status           = $parseStatus
                 output_path      = if (Test-Path -LiteralPath $outputPath -PathType Leaf) { Convert-ToStablePath -Path $outputPath } else { $null }
                 content_bytes    = $contentBytes
                 has_heading      = $hasHeading
@@ -487,14 +632,17 @@ try {
             })
 
         if ($null -ne $errorCode) {
+            if ([string]::IsNullOrWhiteSpace($nextAction)) {
+                $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $null
+            }
             $failureRows.Add([ordered]@{
                     run_id        = [string]$config.RunId
                     source_id     = $sourceId
-                    stage         = if ($errorCode -in @('raw_quality_failed', 'raw_path_escape')) { 'raw' } else { 'mineru' }
+                    stage         = Get-FailureStage -ErrorCode $errorCode
                     error_code    = $errorCode
                     message       = $message
-                    retryable     = ($errorCode -in @('mineru_output_missing', 'raw_quality_failed'))
-                    next_action   = 'regenerate MinerU output for this committed archive or remove it from the batch after review'
+                    retryable     = (Test-RetryableError -ErrorCode $errorCode)
+                    next_action   = $nextAction
                     artifact_path = if (Test-Path -LiteralPath $outputPath -PathType Leaf) { Convert-ToStablePath -Path $outputPath } else { Convert-ToStablePath -Path $outputDir }
                 })
             $rawRows.Add([ordered]@{
@@ -505,7 +653,7 @@ try {
                     raw_path         = ''
                     raw_sha256       = ''
                     collision_suffix = $null
-                    status           = 'failed'
+                    status           = Get-RawStatusForError -ErrorCode $errorCode
                     message          = $message
                 })
         }
@@ -517,7 +665,7 @@ try {
     Write-Utf8NoBomLines -Path $rawManifestPath -Lines ([string[]]$rawLines)
     Write-FailureRows -Path $failuresPath -Rows @($failureRows)
 
-    $failedRows = @($rawRows | Where-Object { [string]$_['status'] -eq 'failed' })
+    $failedRows = @($rawRows | Where-Object { [string]$_['status'] -in @('failed', 'quality_failed') })
     if ($failedRows.Count -gt 0) {
         Write-Output 'RAW INGEST COMPLETED WITH FAILURES'
         exit 1

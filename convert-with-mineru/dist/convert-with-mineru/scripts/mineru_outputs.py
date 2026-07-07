@@ -12,6 +12,7 @@ class OutputTargets:
     json_dir: Path | None
     json_files: dict[str, Path]
     images_dir: Path
+    manifest: Path
     stem: str
 
 
@@ -33,10 +34,11 @@ def _allocate_stem(source_stem: str, used_stems: set[str] | None) -> str:
 def build_output_targets(
     source: Path,
     output_root: Path,
-    include_json: bool,
-    keep_raw_tree: bool,
+    include_json: bool = False,
+    keep_raw_tree: bool = False,
     used_stems: set[str] | None = None,
     relative_root: Path | None = None,
+    allocated_stem: str | None = None,
 ) -> OutputTargets:
     if keep_raw_tree and relative_root is not None:
         try:
@@ -47,7 +49,12 @@ def build_output_targets(
     else:
         dest_dir = output_root
     dest_dir.mkdir(parents=True, exist_ok=True)
-    stem = _allocate_stem(source.stem, used_stems)
+    if allocated_stem is None:
+        stem = _allocate_stem(source.stem, used_stems)
+    else:
+        stem = allocated_stem
+        if used_stems is not None:
+            used_stems.add(stem)
     json_dir = dest_dir / f"{stem}.json" if include_json else None
     return OutputTargets(
         markdown=dest_dir / f"{stem}.md",
@@ -59,6 +66,7 @@ def build_output_targets(
         if json_dir is not None
         else {},
         images_dir=dest_dir / f"{stem}.images",
+        manifest=dest_dir / f"{stem}.manifest.json",
         stem=stem,
     )
 

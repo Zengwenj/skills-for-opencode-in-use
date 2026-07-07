@@ -14,9 +14,7 @@ from scripts.mineru_quality import (
 def _result(
     markdown: str | None = None,
     page_count: int | None = None,
-    json_files: dict[str, Path] | None = None,
     images_dir: Path | None = None,
-    require_json: bool = False,
     source: Path | None = None,
 ) -> QualityGateResult:
     if markdown is None:
@@ -24,9 +22,7 @@ def _result(
     return check_quality_gates(
         markdown=markdown,
         page_count=page_count,
-        json_files=json_files,
         images_dir=images_dir,
-        require_json=require_json,
         source=source or Path("test.pdf"),
     )
 
@@ -137,28 +133,31 @@ class TestMissingImagePath:
         r = _result(markdown=md)
         assert r.passed
 
+    def test_rewritten_image_path_resolves_correctly(self, tmp_path: Path):
+        # Regression: rewritten MD has `report.images/img1.png` while
+        # images_dir is the actual `<root>/report.images` dir.
+        img_dir = tmp_path / "report.images"
+        img_dir.mkdir()
+        (img_dir / "img1.png").write_bytes(b"\x89PNG")
+        md = "![img](report.images/img1.png)\n" + "足够长度以避免空输出。" * 3
+        r = _result(markdown=md, images_dir=img_dir, source=tmp_path / "report.md")
+        assert r.passed, f"expected pass but failed: {r.failed_gates}"
 
-class TestMissingRequiredJson:
-    def test_require_json_missing_fails(self):
-        r = _result(
-            json_files={},
-            require_json=True,
-        )
+    def test_rewritten_image_path_with_subdir(self, tmp_path: Path):
+        img_dir = tmp_path / "report.images"
+        (img_dir / "sub").mkdir(parents=True)
+        (img_dir / "sub" / "img1.png").write_bytes(b"\x89PNG")
+        md = "![img](report.images/sub/img1.png)\n" + "足够长度以避免空输出。" * 3
+        r = _result(markdown=md, images_dir=img_dir, source=tmp_path / "report.md")
+        assert r.passed, f"expected pass but failed: {r.failed_gates}"
+
+    def test_rewritten_image_path_missing_still_fails(self, tmp_path: Path):
+        img_dir = tmp_path / "report.images"
+        img_dir.mkdir()
+        md = "![img](report.images/missing.png)\n" + "足够长度以避免空输出。" * 3
+        r = _result(markdown=md, images_dir=img_dir, source=tmp_path / "report.md")
         assert not r.passed
-        assert any(g.gate_id == "missing_required_json" for g in r.failed_gates)
-
-    def test_require_json_present_passes(self, tmp_path: Path):
-        cl = tmp_path / "test.content_list.json"
-        cl.write_text("[]", encoding="utf-8")
-        r = _result(
-            json_files={"content_list": cl},
-            require_json=True,
-        )
-        assert r.passed
-
-    def test_no_require_json_missing_passes(self):
-        r = _result(json_files={}, require_json=False)
-        assert r.passed
+        assert any(g.gate_id == "missing_image_path" for g in r.failed_gates)
 
 
 class TestInsufficientPageCoverage:

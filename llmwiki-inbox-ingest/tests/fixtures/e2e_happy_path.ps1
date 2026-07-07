@@ -5,6 +5,10 @@ Complete-Fixture {
     $workspace = New-FixtureWorkspace -Name 'e2e-happy-path'
     try {
         Invoke-FullHappyPathPipeline -Workspace $workspace
+        Assert-MineruBatchRouteAssertionsRejectInvalidItems
+
+        $batchPath = Join-Path -Path ([string]$workspace.RunDir) -ChildPath 'mineru-batch.json'
+        Assert-MineruBatchRouteSchema -Path $batchPath
 
         foreach ($artifact in @('inventory.jsonl', 'classification-plan.jsonl', 'apply-manifest.jsonl', 'mineru-batch.json', 'parse-manifest.csv', 'raw-output-manifest.csv')) {
             Assert-FileExists -Path (Join-Path -Path ([string]$workspace.RunDir) -ChildPath $artifact) -Label $artifact

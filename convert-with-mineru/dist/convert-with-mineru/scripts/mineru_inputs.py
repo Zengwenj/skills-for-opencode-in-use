@@ -35,7 +35,7 @@ PDF_TEXT_MARKERS = (b"/Font", b"BT", b"Tj", b"TJ", b"Tf", b"/ToUnicode")
 PDF_IMAGE_MARKERS = (b"/Subtype /Image", b"/Image", b"/XObject", b" Do")
 
 KNOWN_EXTENSIONS = MINERU_EXTENSIONS | UNSUPPORTED_EXTENSIONS
-OUTPUT_DIRECTORY_SUFFIXES = {".images", ".json", ".raw"}
+OUTPUT_DIRECTORY_SUFFIXES = {".images", ".raw"}
 
 
 def _is_excluded(path: Path, excluded_roots: list[Path]) -> bool:
@@ -44,6 +44,8 @@ def _is_excluded(path: Path, excluded_roots: list[Path]) -> bool:
         return True
     for parent in resolved.parents:
         if parent.suffix.lower() in OUTPUT_DIRECTORY_SUFFIXES:
+            return True
+        if parent.name == "_review":
             return True
         if parent.name.lower().startswith("_mineru"):
             return True

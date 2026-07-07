@@ -110,3 +110,44 @@ def test_split_routed_inputs_groups_html_separately(tmp_path):
 
     assert routed["mineru"] == [docx]
     assert routed["mineru_html"] == [html]
+
+
+@pytest.mark.parametrize(
+    "filename,content",
+    [
+        ("scan.pdf", b"%PDF-1.7\n/XObject /Image Do"),
+        ("photo.png", b"png"),
+        ("photo.jpg", b"jpg"),
+        ("photo.jpeg", b"jpeg"),
+        ("photo.jp2", b"jp2"),
+        ("photo.webp", b"webp"),
+        ("photo.gif", b"gif"),
+        ("photo.bmp", b"bmp"),
+    ],
+)
+def test_prefer_multimodal_routes_pdf_and_images_to_multimodal_looker(
+    tmp_path, filename, content
+):
+    source = tmp_path / filename
+    source.write_bytes(content)
+
+    assert route_file(source, prefer_multimodal=True) == "multimodal_looker"
+
+
+@pytest.mark.parametrize(
+    "filename,content",
+    [
+        ("report.pdf", b"%PDF-1.7"),
+        ("report.docx", b"docx"),
+        ("slides.pptx", b"pptx"),
+        ("sheet.xlsx", b"xlsx"),
+        ("photo.png", b"png"),
+    ],
+)
+def test_supported_formats_do_not_use_multimodal_without_explicit_opt_in(
+    tmp_path, filename, content
+):
+    source = tmp_path / filename
+    source.write_bytes(content)
+
+    assert route_file(source) != "multimodal_looker"

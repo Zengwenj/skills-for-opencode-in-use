@@ -18,7 +18,11 @@ $script:Cases = @(
     'target_exists',
     'source_changed',
     'obsidian_artifacts_excluded',
-    'already_committed_idempotent'
+    'already_committed_idempotent',
+    'mineru_lifecycle_pending_resume',
+    'mineru_missing_heading_contentful',
+    'mineru_pending_stub',
+    'mineru_legacy_batch_rejected'
 )
 
 function Write-TestResult {

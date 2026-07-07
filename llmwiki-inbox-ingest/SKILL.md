@@ -11,7 +11,17 @@ description: This skill should be used when running weekly inbox cleanup, ingest
 
 架构固定为：配置解析与初始化 → scan inventory → proposal dry-run → 人工审批 → 带锁的 copy+hash+atomic rename apply → committed-only MinerU bridge → raw/sources ingest → validate-run。
 
+MinerU bridge 的 canonical 批量路径是 Precision API lifecycle runner（`convert-with-mineru/scripts/mineru_lifecycle_runner.py`）。完整生命周期契约（17 个状态、状态机转换、committed-only rules、output remapping ownership）定义在 `references/mineru-bridge-contract.md`。CLI `python -m scripts.mineru_convert` 仅作为 bounded single-file diagnostic，不作为批量默认路径。
+
 所有路径来自 config 或 CLI 参数，脚本不得内置项目路径默认值。源文件始终保留在原位，使用 copy + SHA256 verify + atomic rename 写入 archive。
+
+## When Not To Use
+
+在这些场景不要使用本技能：
+- 仅需转换单个文档而不需要归档/审批流程：优先直接用 `convert-with-mineru` skill 的 lifecycle runner 或 CLI。
+- inbox 中全是 Markdown 文件：本 skill 专门处理非 Markdown 原始文件；Markdown 文件应按 Obsidian vault 规则直接归档。
+- 不需要人工审批门控：本 skill 的 approval gate 是硬性要求，不能跳过或自动批准。
+- 目标环境不是本地 Windows 文件系统且有 POSIX 路径要求：本 skill 的 PowerShell 脚本面向 Windows NTFS 路径。
 
 ## 五分钟每周流程
 
@@ -29,7 +39,7 @@ description: This skill should be used when running weekly inbox cleanup, ingest
 
 6. **Prepare MinerU batch：** 运行 `prepare-mineru-batch.ps1`，仅从 `apply-manifest.jsonl` 中 `committed` 或 `skipped_existing_committed` 的 archive 文件生成 `mineru-batch.json`。未 committed 的文件不得进入批次。
 
-7. **Agent 调 MinerU：** agent 读取 `mineru-batch.json`，按 source_id 调用 `convert-with-mineru`，输出保存到 `run/mineru-output/<source_id>/`。PowerShell 脚本不得直接调用 convert-with-mineru。
+7. **Agent 调 MinerU：** agent 读取 `mineru-batch.json`，按其中已有的 `source_id` 逐项处理。MinerU bridge 的 canonical 批量路径是 Precision API lifecycle runner（`convert-with-mineru/scripts/mineru_lifecycle_runner.py`），完整生命周期契约（17 个状态、状态机转换、committed-only rules、output remapping ownership）定义在 `references/mineru-bridge-contract.md`。lifecycle runner 负责整个批量生命周期：prepare/submit/upload/poll/download/remap/validate。CLI `python -m scripts.mineru_convert` 仅作为 bounded single-file diagnostic，不作为批量默认路径。禁止使用 MCP `mineru_parse_documents` 工具，禁止使用 Agent 轻量解析 API `/api/v1/agent/parse/*`，禁止使用 flash、轻量、pipeline 默认路径，禁止用直接 HTTP Precision API 调用替代 lifecycle runner。非 HTML 文件的 `model_version` 必须为 `vlm`；HTML/HTM 文件的 `model_version` 必须为 `MinerU-HTML`。输出保存到 `run/mineru-output/<source_id>/`，其中 Markdown 为 `<source_id>.md`，图片目录为 `<source_id>.images/`。PowerShell 脚本不得直接调用 convert-with-mineru。
 
 8. **Ingest raw 与 validate：** 运行 `ingest-mineru-output.ps1` 将合格 Markdown 写入 `rawSourcesRoot`，带 raw frontmatter；然后运行 `validate-run.ps1` 检查全链路产物完整性。
 
@@ -66,7 +76,7 @@ PowerShell 7 脚本，每个脚本首行 `#Requires -Version 7.0`，输出 UTF-8
 - 每个脚本错误必须说明：发生了什么、哪个文件或字段出错、期望值是什么、下一步怎么修。
 - 缺配置、pending approval、hash mismatch、source changed、target exists、path escape、raw quality failed 等场景一律 fail closed，并把可执行修复动作写入 stderr 或 `failures.csv`。
 - 操作者只需要按五分钟每周流程顺序推进；任何非零退出都先阅读对应 run artifact 和 `failures.csv`，修复后重新从安全阶段开始。
-- PowerShell 脚本不调用 convert-with-mineru；agent 根据 `mineru-batch.json` 调用 convert-with-mineru 或使用 mock mode fixture。
+- PowerShell 脚本不调用 convert-with-mineru；agent 根据 `mineru-batch.json` 通过 lifecycle runner（`scripts/mineru_lifecycle_runner.py`）执行 Precision API 批量转换（完整契约见 `references/mineru-bridge-contract.md`），或在 fixture 测试中使用 mock mode。
 
 ## 硬边界
 

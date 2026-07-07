@@ -154,10 +154,29 @@ evidence/
 | `items[].archive_sha256` | string | 是 | committed archive SHA256 |
 | `items[].extension` | string | 是 | 扩展名 |
 | `items[].mineru_route` | string | 是 | `convert_with_mineru`、`convert_with_mineru_html`、`mock`、`skip_unsupported` |
+| `items[].processor` | string | 是 | Todo 4 新增字段；`convert_with_mineru`、`convert_with_mineru_html`、`multimodal_looker`、`mock`、`skip_unsupported` |
+| `items[].api_family` | string/null | 是 | Todo 4 新增字段；真实 MinerU CLI route 固定为 `mineru_precision_api`；`multimodal_looker`、`mock`、`skip_unsupported` 不填或为 null |
+| `items[].model_version` | string/null | 是 | Todo 4 新增字段；非 HTML MinerU CLI route 为 `vlm`，HTML/HTM 为 `MinerU-HTML`；非 MinerU route 为 null |
+| `items[].requires_token_env` | string/null | 是 | Todo 4 新增字段；真实 MinerU CLI route 为 `MINERU_TOKEN`；非 MinerU route 为 null |
+| `items[].forbidden_processors` | array[string] | 是 | Todo 4 新增字段；至少包含 `mineru_parse_documents`、`/api/v1/agent/parse/*`、`flash`、`pipeline_default`、`direct_http_precision_api` |
 | `items[].output_dir` | string | 是 | `mineru-output/<source_id>/` |
 | `items[].language` | string/null | 否 | OCR 语言提示 |
 | `items[].raw_target_hint` | string | 是 | raw 目标提示路径 |
 | `items[].reason_if_skipped` | string/null | 否 | 跳过原因 |
+
+本 Todo 只固定目标 schema；Todo 4 负责让脚本写出新增字段。Agent bridge 必须按 Precision API lifecycle runner 契约解释这些字段：真实 MinerU 批量解析只允许 lifecycle runner（定义见 `mineru-bridge-contract.md`），禁止 MCP、Agent 轻量 API、flash、轻量、pipeline 默认路径。CLI `python -m scripts.mineru_convert` 仅用于 bounded single-file diagnostic，不作为批量默认。
+
+支持格式和模型映射：
+
+| 扩展名 | processor | api_family | model_version |
+| --- | --- | --- | --- |
+| `.pdf`/`.doc`/`.docx`/`.ppt`/`.pptx`/`.xls`/`.xlsx` | `convert_with_mineru` | `mineru_precision_api` | `vlm` |
+| `.png`/`.jpg`/`.jpeg`/`.jp2`/`.webp`/`.gif`/`.bmp` | `convert_with_mineru` | `mineru_precision_api` | `vlm` |
+| `.html`/`.htm` | `convert_with_mineru_html` | `mineru_precision_api` | `MinerU-HTML` |
+| 显式 opt-in 多模态 guidance | `multimodal_looker` | null | null |
+| fixture 测试 | `mock` | null | null |
+
+如果当前 llmwiki 配置不接收 HTML/HTM，HTML/HTM 必须标记为 `skip_unsupported` 或不进入 MinerU batch；不得改走 pipeline 默认或 Agent 轻量 API。
 
 ## 7. parse-manifest.csv
 

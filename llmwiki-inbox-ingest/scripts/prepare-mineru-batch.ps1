@@ -14,23 +14,24 @@ Set-StrictMode -Version Latest
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
 $script:RequiredConfigFields = @('inboxRoot', 'archiveRoot', 'rawSourcesRoot', 'reviewRoot', 'themeList', 'scope')
 $script:CommittedStates = @('committed', 'skipped_existing_committed')
+$script:ForbiddenProcessors = @('mcp', 'agent_lightweight_api', 'flash', 'pipeline', 'mineru_parse_documents', '/api/v1/agent/parse/*', 'pipeline_default')
 $script:CapabilityMatrix = @{
-    '.pdf'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.doc'  = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'token_or_env_detected'; reason_if_unsupported = 'Flash mode may not support .doc; require environment capability check' }
-    '.docx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.ppt'  = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'token_or_env_detected'; reason_if_unsupported = 'Flash mode may not support .ppt; require environment capability check' }
-    '.pptx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.xls'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.xlsx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.png'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.jpg'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.jpeg' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.jp2'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.webp' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.gif'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.bmp'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; reason_if_unsupported = '' }
-    '.html' = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'convert_with_mineru_html'; reason_if_unsupported = 'Only supported when routed as HTML page/model and environment confirms' }
-    '.htm'  = @{ supported_for_archive = $true; supported_for_mineru = 'conditional'; mineru_mode = 'convert_with_mineru_html'; reason_if_unsupported = 'Only supported when routed as HTML page/model and environment confirms' }
+    '.pdf'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.doc'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.docx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.ppt'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.pptx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.xls'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.xlsx' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.png'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.jpg'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.jpeg' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.jp2'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.webp' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.gif'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.bmp'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru'; model_version = 'vlm'; reason_if_unsupported = '' }
+    '.html' = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru_html'; model_version = 'MinerU-HTML'; reason_if_unsupported = '' }
+    '.htm'  = @{ supported_for_archive = $true; supported_for_mineru = 'true'; mineru_mode = 'convert_with_mineru_html'; model_version = 'MinerU-HTML'; reason_if_unsupported = '' }
 }
 
 function Write-PrepareError {
@@ -169,11 +170,20 @@ function Resolve-PrepareConfig {
         $language = 'ch'
     }
 
+    $pollingBudgetSeconds = 1800
+    if ($config.ContainsKey('mineruPollingBudgetSeconds') -and -not [string]::IsNullOrWhiteSpace([string]$config['mineruPollingBudgetSeconds'])) {
+        $pollingBudgetSeconds = [int]$config['mineruPollingBudgetSeconds']
+        if ($pollingBudgetSeconds -le 0) {
+            throw 'Config field mineruPollingBudgetSeconds must be a positive integer.'
+        }
+    }
+
     return [pscustomobject]@{
-        ConfigPath = $resolvedConfigPath
-        RunDir     = $resolvedRunDir
-        RunId      = $runDirName
-        Language   = $language
+        ConfigPath            = $resolvedConfigPath
+        RunDir                = $resolvedRunDir
+        RunId                 = $runDirName
+        Language              = $language
+        PollingBudgetSeconds  = $pollingBudgetSeconds
     }
 }
 
@@ -293,7 +303,7 @@ try {
         $reason = $null
         switch ([string]$capability.supported_for_mineru) {
             'true' {
-                $mineruRoute = 'convert_with_mineru'
+                $mineruRoute = [string]$capability.mineru_mode
                 $reason = $null
             }
             'conditional' {
@@ -315,6 +325,21 @@ try {
             }
         }
 
+        $routeFields = [ordered]@{
+            processor            = $mineruRoute
+            api_family           = $null
+            model_version        = $null
+            requires_token_env   = $null
+            forbidden_processors = $null
+        }
+
+        if ($mineruRoute -eq 'convert_with_mineru' -or $mineruRoute -eq 'convert_with_mineru_html') {
+            $routeFields.api_family = 'precision_api'
+            $routeFields.model_version = [string]$capability.model_version
+            $routeFields.requires_token_env = 'MINERU_TOKEN'
+            $routeFields.forbidden_processors = @($script:ForbiddenProcessors)
+        }
+
         $outputDir = Join-Path -Path ([string]$config.RunDir) -ChildPath (Join-Path -Path 'mineru-output' -ChildPath $sourceId)
         $batchItems.Add([ordered]@{
                 source_id         = $sourceId
@@ -322,6 +347,11 @@ try {
                 archive_sha256    = $archiveSha256
                 extension         = $extension
                 mineru_route      = $mineruRoute
+                processor         = $routeFields.processor
+                api_family        = $routeFields.api_family
+                model_version     = $routeFields.model_version
+                requires_token_env = $routeFields.requires_token_env
+                forbidden_processors = $routeFields.forbidden_processors
                 output_dir        = Convert-ToStablePath -Path $outputDir
                 language          = [string]$config.Language
                 raw_target_hint   = New-RawTargetHint -PlanItem $planItem -ArchivePath $archivePath
@@ -329,11 +359,31 @@ try {
             })
     }
 
+    $statePath = Join-Path -Path ([string]$config.RunDir) -ChildPath 'lifecycle-state.jsonl'
     $batch = [ordered]@{
-        schema_version = '1.0'
-        run_id         = [string]$config.RunId
-        created_at     = [DateTime]::UtcNow.ToString('o')
-        items          = @($batchItems)
+        schema_version          = '1.0'
+        run_id                  = [string]$config.RunId
+        created_at              = [DateTime]::UtcNow.ToString('o')
+        state_path              = Convert-ToStablePath -Path $statePath
+        polling_budget_seconds  = [int]$config.PollingBudgetSeconds
+        output_stem_mapping     = [ordered]@{
+            owner      = 'lifecycle_runner'
+            markdown   = '<source_id>.md'
+            images_dir = '<source_id>.images/'
+        }
+        quality_gate_policy     = [ordered]@{
+            min_content_bytes = 500
+            pending_stub = [ordered]@{
+                status = 'pending_stub'
+                action = 'resubmit_or_extend_poll_timeout'
+            }
+            missing_heading_contentful = [ordered]@{
+                status = 'missing_heading_contentful'
+                min_content_bytes = 500
+                action = 'review_or_normalize_heading'
+            }
+        }
+        items                   = @($batchItems)
     }
 
     Write-Utf8NoBomText -Path $batchPath -Text ($batch | ConvertTo-Json -Compress -Depth 8)

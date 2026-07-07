@@ -19,6 +19,7 @@ EXCLUDED_TOP_LEVEL_NAMES = {
     "mineru..env",
 }
 EXCLUDED_ANYWHERE_NAMES = {"__pycache__"}
+EXCLUDED_DIRECTORY_NAMES = {"_mineru", "_review"}
 EXCLUDED_SUFFIXES = {".pyc", ".pyo"}
 SAFE_IN_TREE_DESTINATIONS = {"dist"}
 
@@ -31,6 +32,7 @@ def should_exclude(path: Path, source_root: Path) -> bool:
         return True
     return (
         any(part in EXCLUDED_ANYWHERE_NAMES for part in relative_parts)
+        or any(part in EXCLUDED_DIRECTORY_NAMES for part in relative_parts)
         or path.suffix in EXCLUDED_SUFFIXES
     )
 
