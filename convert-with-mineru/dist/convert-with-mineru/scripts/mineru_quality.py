@@ -209,3 +209,19 @@ def check_quality_gates(
         failed.append(gate)
 
     return QualityGateResult(passed=len(failed) == 0, failed_gates=failed)
+
+
+def quality_gate_payload(result: QualityGateResult) -> dict:
+    return {
+        "status": "passed" if result.passed else "failed",
+        "passed": result.passed,
+        "failed_gates": [
+            {
+                "source": gate.source,
+                "gate_id": gate.gate_id,
+                "reason": gate.reason,
+                "suggested_route": gate.suggested_route,
+            }
+            for gate in result.failed_gates
+        ],
+    }

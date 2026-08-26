@@ -1,6 +1,6 @@
 ---
 name: convert-with-mineru
-description: Use when converting local document directories or files with MinerU precision batch mode, preserving source-based filenames for Markdown and images output with quality gating.
+description: Use when converting local document directories or files with MinerU precision batch mode, preserving source-based filenames for Markdown and images output with quality gating. Handwriting enhancement routes PDFs/images through MinerU first, then a vision-corrected, conservatively-revised task package flow.
 ---
 
 # Convert With MinerU
@@ -22,7 +22,7 @@ description: Use when converting local document directories or files with MinerU
 - `csv/tsv/json/xml/epub/zip` 明确不支持（`unsupported`），不委托其他 skill。
 - 不存在、不可读、0-byte 的官方支持格式路由到 `invalid_input`。
 - 正式输出只有 `source.md` + `source.images/`，不产出 JSON。
-- `multimodal_looker` 保留为非 MinerU 的显式 opt-in LLM 图像识别理解路由（通过 `--prefer-multimodal`），不是 MinerU fallback。
+- `--prefer-multimodal` 是**手写校对管道**的显式 opt-in：PDF/图片仍先经 MinerU Precision 转写，转换后生成手写校对任务包，由 agent 编排层（multimodal-looker subagent / omp vision role）做视觉补充识别与语义修订，脚本本身零 LLM API 调用。
 
 ## When To Use
 
@@ -44,21 +44,22 @@ description: Use when converting local document directories or files with MinerU
 | 单文件手动诊断 | `python -m scripts.mineru_convert <file>` | Bounded single-file diagnostic；非 HTML 显式 `model_version: "vlm"`，HTML/HTM 显式 `model_version: "MinerU-HTML"` |
 | 单目录 CLI | `python -m scripts.mineru_convert --recursive <folder>` | 同上，循环调用单文件转换；不是批量默认路径 |
 | 启用审计归档 | 追加 `--audit-dir <path>` | 生成 raw archive、batch manifest、per-file manifest |
-| 手写/低质/重复灌词 PDF 或图片 | 追加 `--prefer-multimodal` | 非 MinerU 显式 opt-in，走 `multimodal_looker` guidance 路由 |
+| 手写/低质 PDF 或图片 | 追加 `--prefer-multimodal` | MinerU 先转 + 生成手写校对任务包，视觉补充识别与语义修订由 agent 编排层完成（见下文手写管道） |
 | 外置配置文件 | 追加 `--config <path>` | 参考 `examples/mineru.env` |
 | `csv/tsv/json/xml/epub/zip` | **不支持** | 不委托其他 skill |
 
 ## Routes
 
-本 skill 的确定性路由结果为以下五个 canonical route 之一：
+本 skill 的确定性路由结果为以下四个 canonical route 之一：
 
 | Route | 含义 | 触发条件 |
 | --- | --- | --- |
 | `mineru` | MinerU Precision API `vlm` 模型 | 非 HTML 的官方支持格式 |
 | `mineru_html` | MinerU Precision API `MinerU-HTML` 模型 | `.html` `.htm` |
-| `multimodal_looker` | 输出 LLM 图像识别 guidance（不调用外部 API） | `--prefer-multimodal` 时的 PDF/图片 |
 | `unsupported` | 明确不支持的格式 | `.csv` `.tsv` `.json` `.xml` `.epub` `.zip` 等 |
 | `invalid_input` | 文件不存在、不可读或 0-byte | 任何官方支持格式但无法读取 |
+
+`multimodal_looker` 不再是前置路由值：`--prefer-multimodal` 不改变路由，PDF/图片仍走 `mineru` 先转写。质量门控失败时 manifest 中的 `suggested_route: "multimodal_looker"` 语义为"建议走手写校对管道"。
 
 ## Output Rules
 
@@ -72,6 +73,7 @@ description: Use when converting local document directories or files with MinerU
 - 重名冲突使用 `__2`、`__3` 后缀。
 - Per-file manifest（`source.manifest.json`）仅在启用 `--audit-dir` 时生成，是审计元数据而非 MinerU 原生 JSON。
 - Raw 归档仅存入外部审计目录 `_review/mineru/<batch_id>/raw/`，不放入正式输出目录。
+- 手写校对任务包（`<stem>.handwriting-task/`）是流程中间产物而非正式输出；finalize 后 `source.md` 为修订终稿，三稿与报告留在任务包目录内供追溯。
 
 ## Commands
 
@@ -99,15 +101,52 @@ python -m scripts.mineru_convert --audit-dir "C:\audit\mineru" --recursive <fold
 
 也可通过环境变量 `MINERU_AUDIT_DIR` 或配置文件的 `AUDIT_DIR` 键设置。默认归档路径为 `<output_root>/../_review/mineru/<batch_id>/`。
 
-显式 opt-in LLM 图像识别理解路由：
+显式 opt-in 手写校对管道：
 
 ```powershell
-python -m scripts.mineru_convert --recursive <folder> --prefer-multimodal
+python -m scripts.mineru_convert --prefer-multimodal <file>
 ```
 
-`--prefer-multimodal` 将匹配的 PDF/图片路由到 `multimodal_looker`，只输出 guidance（建议使用多模态 LLM 进行图像识别理解），不实际调用外部视觉 API。它是非 MinerU 的显式 opt-in 路由，不是 MinerU Precision API 失败后的 fallback。
+`--prefer-multimodal` 下 PDF/图片**仍先经 MinerU Precision 转写**（不再前置绕过），转换后为每个 PDF/图片产物生成手写校对任务包（`<stem>.handwriting-task/`），并打印后续步骤 guidance。非 PDF/图片文件带此 flag 也按常规 MinerU 转换处理（打印跳过提示）。见下文"手写文档管道"。
+
+任务包收尾：
+
+```powershell
+python -m scripts.mineru_handwriting finalize <任务包目录>
+```
 
 `--require-json` 已弃用，仅打印 warning。
+
+## 手写文档管道（Handwriting Pipeline）
+
+三段式分工——脚本做确定性工作，agent 编排层做识别与修订：
+
+```
+python -m scripts.mineru_convert <手写文件> --prefer-multimodal
+  ① 输入预检（WARNING 不阻断）：DPI<150、宽高比>2:1 疑似双页粘连
+  ② MinerU Precision vlm 高精度转写 → 草稿
+  ③ prepare：生成自包含任务包 + guidance
+        ↓ agent 编排层
+  ④ 视觉补充识别 → supplement.md
+  ⑤ 语义修订 → revised.md
+        ↓
+python -m scripts.mineru_handwriting finalize <任务包目录>
+  ⑥ 校验产物与页标记 → 重叠去重（后批为准）→ 剥离两级标记入报告
+  ⑦ 图片引用机械回填 → 终稿门控复跑 → source.md ← 终稿
+```
+
+**任务包结构**（`<output_root>/<stem>.handwriting-task/`）：`task.json`（机器可读清单）、`TASK.md`（自包含指令）、`draft.md`、`pages/page-NNN.png`、`supplement.md`（视觉角色写入）、`revised.md`（修订角色写入）。任务包被输入发现与 dist 分发排除。
+
+**角色契约**：
+- 视觉补充识别：multimodal-looker subagent 或 omp vision role（模型基准 `gpt-5.6-terra:xhigh` 或 `kimi-k3:max`，**禁止配置 glm 系列模型**）。忠实抄录，看不清打 `<!-- low-confidence -->` 禁止猜测，图片引用行原样保留，每页以 `<!-- page: N -->` 开头。
+- 语义修订：主 agent 或任意强文本角色（不绑定模型）。分级修订：明确识别错误则修、明确原文风格则留、中间地带打 `<!-- uncertain -->`；禁止增删段落/改结构/改图片引用/人名地名数字归一化。
+- 分批：≤10 页单批；>10 页按 ≤5 页/批且每批重叠上一批最后一页，重叠页后批为准（finalize 机械去重）。
+
+**产物与验收**：source.md 为修订终稿；三稿（draft/supplement/revised）+ `handwriting-report.json` 留痕于任务包目录。验收 = 终稿门控全绿 + 人工抽查三稿 diff（首、中、末页）。
+
+**降级**：页图渲染失败 → 任务包标记 degraded，草稿版 source.md 不受影响；agent 环节缺失 → finalize 报错列缺失项，source.md 保持草稿版可重试；终稿门控失败 → exit 2 人工裁决，不静默回退。
+
+**已知限制**：多栏/竖排/批注穿插导致的阅读顺序错乱、印刷+手写混排表单不在本管道处理范围（表格逐格转写与公式 `$...$` 由 TASK.md 指令覆盖）。
 
 ## Config
 
@@ -142,7 +181,7 @@ MinerU 路由矩阵与分流说明见：
 
 质量门控结果记录在 per-file manifest 的 `warnings` 字段（需 `--audit-dir`），不改变路由阈值。
 
-Fallback 在本 skill 中只表示：失败即失败并记录错误，或用户显式指定 `--prefer-multimodal` 时进入非 MinerU 的 `multimodal_looker` guidance。不得自动切到 MCP、Agent 轻量解析 API、flash 或官方默认 `pipeline`。
+Fallback 在本 skill 中只表示：失败即失败并记录错误，或用户显式指定 `--prefer-multimodal` 时进入手写校对管道（MinerU 先转 + 任务包后置补充，不是绕过 MinerU）。不得自动切到 MCP、Agent 轻量解析 API、flash 或官方默认 `pipeline`。
 
 脚本级路由规则：
 - `.pdf`/`.doc`/`.docx`/`.ppt`/`.pptx`/`.xls`/`.xlsx` → `mineru`（`vlm` 模型）
@@ -150,7 +189,7 @@ Fallback 在本 skill 中只表示：失败即失败并记录错误，或用户�
 - `.png`/`.jpg`/`.jpeg`/`.jp2`/`.webp`/`.gif`/`.bmp` → `mineru`（`vlm` 模型）
 - `.csv`/`.tsv`/`.json`/`.xml`/`.epub`/`.zip` → `unsupported`
 - 不存在/不可读/0-byte → `invalid_input`
-- `--prefer-multimodal` 时的 PDF/图片 → `multimodal_looker`（guidance-only）
+- `--prefer-multimodal` 不改变以上路由：PDF/图片照走 `mineru`，转换后进入手写校对管道
 
 ## Known Issues
 
@@ -165,7 +204,7 @@ Fallback 在本 skill 中只表示：失败即失败并记录错误，或用户�
 - 把 `xls/xlsx` 当作不支持（官方 API 已支持 Excel）
 - 尝试用本 skill 处理 `csv/tsv/json/xml/epub/zip`（明确不支持）
 - 把 MCP `mineru_parse_documents`、Agent 轻量解析 API、flash 或默认 `pipeline` 当作本 skill fallback
-- 手写/低质/重复灌词场景不使用 `--prefer-multimodal` 导致输出质量差
+- 手写/低质场景只加 `--prefer-multimodal` 却不做视觉校对/语义修订/finalize 三步，误以为转写即完成
 - 直接把 ZIP 里的 `full.md` 当最终产物
 - 让 `.md` 继续引用 `images/...`，却把图片目录改名成 `source.images/`
 - 通过 `$env:MINERU_API_TOKEN` 检查 opencode MCP 是否已配置 token（MCP environment 在 `opencode.json` 中，与 shell 环境变量独立）
@@ -177,7 +216,9 @@ Fallback 在本 skill 中只表示：失败即失败并记录错误，或用户�
 - "MineU 不支持也许也能跑"
 - "没有 JSON 我就生成一个空 JSON"
 - "Excel 不支持所以跳过"
-- "图片应该走 multimodal-looker 默认"
+- "--prefer-multimodal 应该绕过 MinerU 直接交给视觉模型"
+- "视觉校对环节用 glm 系列模型也行"
+- "语义修订就是把文本润色通顺"（应分级保守修订，目标是还原原文）
 - "Precision API 失败就自动切 MCP/flash/Agent 轻量解析"
 - "不传 model_version，让官方默认 pipeline 决定"
 

@@ -14,6 +14,7 @@ class OutputTargets:
     images_dir: Path
     manifest: Path
     stem: str
+    source: Path | None = None
 
 
 def _allocate_stem(source_stem: str, used_stems: set[str] | None) -> str:
@@ -68,6 +69,7 @@ def build_output_targets(
         images_dir=dest_dir / f"{stem}.images",
         manifest=dest_dir / f"{stem}.manifest.json",
         stem=stem,
+        source=source,
     )
 
 

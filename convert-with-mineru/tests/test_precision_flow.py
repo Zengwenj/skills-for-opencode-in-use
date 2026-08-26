@@ -363,7 +363,7 @@ def test_convert_files_uses_stable_source_mapping_for_multiple_inputs(
         == "# beta\n\n![](beta.images/img1.png)\n"
     )
     assert client.batch_call["sources"] == [str(first), str(second)]
-    assert client.batch_call["model_version"] == "vlm"
+    assert client.batch_call["model"] == "vlm"
 
 
 def test_convert_files_passes_keep_raw_tree_setting_to_persist(
@@ -472,7 +472,7 @@ def test_convert_files_html_batch_receives_mineru_html_model_version(
 
     assert len(client.batch_calls) == 1
     assert client.batch_calls[0]["sources"] == [str(html)]
-    assert client.batch_calls[0]["model_version"] == "MinerU-HTML"
+    assert client.batch_calls[0]["model"] == "MinerU-HTML"
     assert client.calls == []
 
 
@@ -489,7 +489,7 @@ def test_convert_files_pdf_batch_receives_vlm_model_version(monkeypatch, tmp_pat
 
     assert len(client.batch_calls) == 1
     assert client.batch_calls[0]["sources"] == [str(pdf)]
-    assert client.batch_calls[0]["model_version"] == "vlm"
+    assert client.batch_calls[0]["model"] == "vlm"
     assert client.calls == []
 
 
@@ -513,8 +513,8 @@ def test_convert_files_mixed_html_and_pdf(monkeypatch, tmp_path: Path):
     pdf_call = next(
         call for call in client.batch_calls if call["sources"] == [str(pdf)]
     )
-    assert html_call["model_version"] == "MinerU-HTML"
-    assert pdf_call["model_version"] == "vlm"
+    assert html_call["model"] == "MinerU-HTML"
+    assert pdf_call["model"] == "vlm"
     assert client.calls == []
 
 

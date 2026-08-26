@@ -160,7 +160,8 @@ def _extract_batch(client, sources: list[Path], model_version: str):
     source_strings = [str(source) for source in sources]
     batch_extract = getattr(client, "extract_batch", None)
     if batch_extract is not None:
-        return batch_extract(source_strings, model_version=model_version)
+        # SDK 的 kwarg 是 model=（"vlm" 直映射，"MinerU-HTML" 透传，二者均为正确 API model_version 值）
+        return batch_extract(source_strings, model=model_version)
     return [_extract_one(client, source) for source in sources]
 
 

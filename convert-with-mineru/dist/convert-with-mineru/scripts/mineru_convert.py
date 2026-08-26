@@ -2,18 +2,22 @@ from __future__ import annotations
 
 import argparse
 from datetime import datetime, timezone
+import json
 import sys
 from pathlib import Path
 
 from .mineru_config import load_settings
+from .mineru_handwriting import TaskPackageInfo, build_task_package
 from .mineru_inputs import discover_inputs, split_routed_inputs
 from .mineru_manifest import (
     build_manifest_entry,
     update_per_file_manifest,
     upsert_batch_manifest,
 )
+from .mineru_outputs import OutputTargets
+from .mineru_pages import IMAGE_SOURCE_EXTENSIONS
 from .mineru_precision import convert_files
-from .mineru_quality import check_quality_gates
+from .mineru_quality import check_quality_gates, quality_gate_payload
 
 
 UNSUPPORTED_HINTS = {
@@ -24,6 +28,9 @@ UNSUPPORTED_HINTS = {
     ".epub": "本 skill 不支持 EPUB。",
     ".zip": "本 skill 不支持 ZIP 文件。",
 }
+
+# --prefer-multimodal 下进入手写校对管道的源类型（PDF 与图片）
+HANDWRITING_SOURCE_SUFFIXES = {".pdf"} | IMAGE_SOURCE_EXTENSIONS
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -73,12 +80,40 @@ def print_invalid_input_guidance(paths: list[Path]) -> None:
         print(f"  - {path}", file=sys.stderr)
 
 
-def print_multimodal_guidance(paths: list[Path]) -> None:
-    if not paths:
+def print_handwriting_guidance(infos: list[TaskPackageInfo]) -> None:
+    if not infos:
         return
-    print("以下文件已强制改走多模态 OCR 识别，请分配给 multimodal-looker（LLM 图像识别理解路由）：")
-    for path in paths:
-        print(f"  - {path} -> multimodal-looker")
+    print("手写校对任务包已生成，请完成视觉校对与语义修订后 finalize：")
+    for info in infos:
+        print(f"  任务包: {info.task_dir}（{info.page_count} 页）")
+        for warning in info.warnings:
+            print(f"    预检: {warning}")
+        if info.degraded_reason:
+            print(f"    降级: {info.degraded_reason}")
+    print(
+        "  1) 视觉校对：multimodal-looker subagent / omp vision role"
+        "（基准 gpt-5.6-terra:xhigh 或 kimi-k3:max，禁止 glm 系列），按 TASK.md 写 supplement.md"
+    )
+    print("  2) 语义修订：主 agent 或任意强文本角色写 revised.md")
+    print("  3) 收尾：python -m scripts.mineru_handwriting finalize <任务包目录>")
+
+
+def _load_source_path(target: OutputTargets) -> Path | None:
+    # 首选 OutputTargets 携带的源路径（无 --audit-dir 时 manifest 不存在）
+    source = getattr(target, "source", None)
+    if source is not None:
+        return Path(source)
+    try:
+        entry = json.loads(target.manifest.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    source_path = entry.get("source_path")
+    return Path(source_path) if source_path else None
+
+
+def _is_handwriting_source(target: OutputTargets) -> bool:
+    source = _load_source_path(target)
+    return source is not None and source.suffix.lower() in HANDWRITING_SOURCE_SUFFIXES
 
 
 def _compute_relative_root(
@@ -94,19 +129,7 @@ def _compute_relative_root(
 
 
 def _quality_gate_payload(qr) -> dict:
-    return {
-        "status": "passed" if qr.passed else "failed",
-        "passed": qr.passed,
-        "failed_gates": [
-            {
-                "source": gate.source,
-                "gate_id": gate.gate_id,
-                "reason": gate.reason,
-                "suggested_route": gate.suggested_route,
-            }
-            for gate in qr.failed_gates
-        ],
-    }
+    return quality_gate_payload(qr)
 
 
 def _relative_source_path(source: Path, relative_root: Path | None) -> Path:
@@ -179,11 +202,10 @@ def main() -> int:
         print("未发现可处理的输入文件", file=sys.stderr)
         return 2
 
-    routed = split_routed_inputs(discovered, prefer_multimodal=args.prefer_multimodal)
+    routed = split_routed_inputs(discovered)
 
     mineru_files = routed.get("mineru", [])
     mineru_html_files = routed.get("mineru_html", [])
-    multimodal_files = routed.get("multimodal_looker", [])
     unsupported_files = routed.get("unsupported", [])
     invalid_files = routed.get("invalid_input", [])
 
@@ -195,7 +217,6 @@ def main() -> int:
 
     print_unsupported_guidance(unsupported_files)
     print_invalid_input_guidance(invalid_files)
-    print_multimodal_guidance(multimodal_files)
 
     if not supported:
         return 2
@@ -248,6 +269,7 @@ def main() -> int:
             )
         )
     quality_failed = False
+    handwriting_candidates: list[tuple[OutputTargets, dict]] = []
     for target in rendered:
         md_text = target.markdown.read_text(encoding="utf-8") if target.markdown.exists() else ""
         qr = check_quality_gates(
@@ -255,12 +277,20 @@ def main() -> int:
             images_dir=target.images_dir if target.images_dir.exists() else None,
             source=target.markdown,
         )
-        if not qr.passed:
+        is_handwriting = args.prefer_multimodal and _is_handwriting_source(target)
+        if is_handwriting:
+            handwriting_candidates.append((target, quality_gate_payload(qr)))
+        elif not qr.passed:
             quality_failed = True
+        if not qr.passed:
             for gate in qr.failed_gates:
+                hint = ""
+                if is_handwriting:
+                    hint = " | 将进入手写校对管道"
+                elif gate.suggested_route:
+                    hint = f" | 建议: {gate.suggested_route}"
                 print(
-                    f"质量门控失败: {gate.source} | {gate.gate_id} | {gate.reason}"
-                    + (f" | 建议: {gate.suggested_route}" if gate.suggested_route else ""),
+                    f"质量门控失败: {gate.source} | {gate.gate_id} | {gate.reason}{hint}",
                     file=sys.stderr,
                 )
         if audit_dir is not None:
@@ -275,10 +305,38 @@ def main() -> int:
                 batch_id=batch_id,
                 model=model,
             )
+    task_infos: list[TaskPackageInfo] = []
+    if args.prefer_multimodal:
+        candidate_stems = {target.stem for target, _ in handwriting_candidates}
+        skipped_stems = [
+            target.stem for target in rendered if target.stem not in candidate_stems
+        ]
+        if skipped_stems:
+            print(
+                "以下文件类型不支持手写校对管道，已按常规 MinerU 转换处理：",
+                file=sys.stderr,
+            )
+            for stem in skipped_stems:
+                print(f"  - {stem}", file=sys.stderr)
+        for target, gates_before in handwriting_candidates:
+            task_infos.append(
+                build_task_package(
+                    source=_load_source_path(target),
+                    stem=target.stem,
+                    output_markdown=target.markdown,
+                    output_images_dir=target.images_dir,
+                    output_manifest=target.manifest,
+                    draft_markdown=target.markdown,
+                    task_root=target.markdown.parent,
+                    gates_before=gates_before,
+                )
+            )
     if quality_failed:
+        print_handwriting_guidance(task_infos)
         return 2
     for target in rendered:
         print(target.markdown)
+    print_handwriting_guidance(task_infos)
     return 0
 
 

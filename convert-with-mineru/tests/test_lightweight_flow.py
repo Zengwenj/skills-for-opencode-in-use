@@ -23,20 +23,60 @@ def test_main_routes_image_to_mineru(tmp_path: Path, monkeypatch, capsys):
     assert result == 0
 
 
-def test_main_routes_image_prefer_multimodal(tmp_path: Path, monkeypatch, capsys):
+def test_main_routes_image_prefer_multimodal_through_mineru(tmp_path: Path, monkeypatch, capsys):
+    # --prefer-multimodal 不再前置绕过 MinerU：图片仍走 mineru 路由，正常完成转换流程
     source = tmp_path / "photo.png"
     source.write_bytes(b"png")
 
-    monkeypatch.setattr(mineru_convert, "load_settings", lambda config: Settings())
+    monkeypatch.setattr(
+        mineru_convert, "load_settings", lambda config: Settings(token="test-token")
+    )
+    monkeypatch.setattr(
+        mineru_convert, "convert_files", lambda *a, **kw: []
+    )
     monkeypatch.setattr("sys.argv", ["mineru_convert", "--prefer-multimodal", str(source)])
+
+    result = mineru_convert.main()
+
+    assert result == 0
+
+
+def test_main_prefer_multimodal_creates_handwriting_task_package(tmp_path: Path, monkeypatch, capsys):
+    import pymupdf
+
+    pdf = tmp_path / "notes.pdf"
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 120), "手写测试内容")
+    doc.save(str(pdf))
+    doc.close()
+
+    rendered = [_make_fake_rendered(tmp_path, "notes")]
+
+    monkeypatch.setattr(
+        mineru_convert, "load_settings", lambda config: Settings(token="tok")
+    )
+    monkeypatch.setattr(
+        mineru_convert, "convert_files", lambda *a, **kw: rendered
+    )
+    monkeypatch.setattr("sys.argv", ["mineru_convert", "--prefer-multimodal", str(pdf)])
 
     result = mineru_convert.main()
     captured = capsys.readouterr()
 
-    assert result == 2
+    assert result == 0
+    task_dir = tmp_path / "_mineru" / "notes.handwriting-task"
+    assert (task_dir / "task.json").exists()
+    assert (task_dir / "draft.md").exists()
+    assert (task_dir / "pages" / "page-001.png").exists()
+    task = json.loads((task_dir / "task.json").read_text(encoding="utf-8"))
+    assert task["status"] == "prepared"
+    assert task["page_count"] == 1
+    assert task["gates_before"]["status"] == "passed"
     assert "multimodal-looker" in captured.out
-    assert "LLM 图像识别理解路由" in captured.out
-    assert str(source) in captured.out
+    assert "vision role" in captured.out or "omp" in captured.out
+    assert "finalize" in captured.out
+    assert str(task_dir) in captured.out
 
 
 def test_main_requires_token_for_supported_files(tmp_path: Path, monkeypatch, capsys):

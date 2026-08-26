@@ -17,9 +17,10 @@
 | --- | --- |
 | `mineru` | MinerU 精准模式，非 HTML 使用 vlm 模型 |
 | `mineru_html` | MinerU HTML 模型（`model_version="MinerU-HTML"`）|
-| `multimodal_looker` | 多模态 vision guidance，显式 opt-in（`--prefer-multimodal`）|
 | `unsupported` | 明确不支持的格式 |
 | `invalid_input` | 文件不存在/不可读/0-byte |
+
+`multimodal_looker` 不再是 route_file 返回值：`--prefer-multimodal` 不改变路由，PDF/图片先经 `mineru` 转写后进入手写校对管道（见 mineru_handwriting.py）。质量门控的 `suggested_route: "multimodal_looker"` 语义为"建议走手写校对管道"。
 
 ## 架构
 
@@ -37,8 +38,8 @@ scripts/
 ├── mineru_inputs.py        ← 输入发现与路由
 │   ├── MINERU_EXTENSIONS       ← 官方支持后缀集（含 xls/xlsx/图片）
 │   ├── UNSUPPORTED_EXTENSIONS  ← 明确不支持的后缀
-│   ├── discover_inputs()       ← 文件/目录递归发现
-│   ├── route_file()            ← 单文件路由决策（5 canonical routes）
+│   ├── discover_inputs()       ← 文件/目录递归发现（排除 .handwriting-task）
+│   ├── route_file()            ← 单文件路由决策（4 canonical routes）
 │   └── split_routed_inputs()   ← 批量路由
 ├── mineru_outputs.py       ← 输出管理
 │   ├── OutputTargets (dataclass)  ← markdown, json_dir, json_files, images_dir, stem
@@ -53,6 +54,13 @@ scripts/
 │   ├── _persist_precision_json_files()  ← JSON 产物持久化
 │   ├── persist_precision_result()       ← 单文件完整持久化流程
 │   └── convert_files()                  ← 批量转换主循环
+├── mineru_pages.py         ← 手写管道页图证据
+│   ├── preflight_image()        ← 输入预检（DPI/宽高比 WARNING，不阻断）
+│   └── collect_page_images()    ← 图片直传 / PDF PyMuPDF 渲染页图
+├── mineru_handwriting.py   ← 手写校对管道（脚本零 LLM API 调用）
+│   ├── build_task_package()     ← prepare: 任务包（页图+草稿+TASK.md+task.json）
+│   ├── finalize_task_package()  ← finalize: 校验/去重/剥离标记/图片回填/门控/终稿
+│   └── main()                   ← python -m scripts.mineru_handwriting finalize <dir>
 └── stage_distribution.py   ← 分发打包
     ├── EXCLUDED_TOP_LEVEL_NAMES  ← 排除 .venv, dist, __pycache__ 等
     ├── should_exclude()          ← 过滤判断
@@ -77,9 +85,11 @@ pytest
 - `conftest.py` — 共享 fixtures
 - `test_config_loading.py` — 配置加载各路径
 - `test_input_discovery.py` — 文件发现与排除
-- `test_mode_selection.py` — 路由决策（5 canonical routes）
+- `test_mode_selection.py` — 路由决策（4 canonical routes）
 - `test_precision_flow.py` — 精准模式转换流程（vlm/MinerU-HTML batch，无 JSON 输出断言）
-- `test_lightweight_flow.py` — CLI 行为测试（`--require-json` 仅打印弃用 warning）
+- `test_lightweight_flow.py` — CLI 行为测试（`--require-json` 仅打印弃用 warning；`--prefer-multimodal` 生成任务包）
+- `test_handwriting_pipeline.py` — 手写管道（批次划分/prepare/finalize/标记剥离/回填/降级）
+- `test_page_images.py` — 页图渲染与输入预检
 - `test_output_mapping.py` — 输出路径映射（md/images-only）
 - `test_quality_gates.py` — 质量门控测试
 - `test_distribution_staging.py` — 分发打包

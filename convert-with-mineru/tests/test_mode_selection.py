@@ -66,7 +66,7 @@ def test_routing_matrix_unknown_extension(tmp_path):
     assert route_file(source) == "unsupported"
 
 
-CANONICAL_ROUTES = {"mineru", "mineru_html", "multimodal_looker", "unsupported", "invalid_input"}
+CANONICAL_ROUTES = {"mineru", "mineru_html", "unsupported", "invalid_input"}
 
 
 def test_route_file_returns_canonical_value(tmp_path):
@@ -125,13 +125,13 @@ def test_split_routed_inputs_groups_html_separately(tmp_path):
         ("photo.bmp", b"bmp"),
     ],
 )
-def test_prefer_multimodal_routes_pdf_and_images_to_multimodal_looker(
-    tmp_path, filename, content
-):
+def test_pdf_and_images_always_route_to_mineru(tmp_path, filename, content):
+    # --prefer-multimodal 不再改变前置路由：PDF/图片先经 MinerU 转写，
+    # 手写补充识别在转换完成后的任务包阶段进行。
     source = tmp_path / filename
     source.write_bytes(content)
 
-    assert route_file(source, prefer_multimodal=True) == "multimodal_looker"
+    assert route_file(source) == "mineru"
 
 
 @pytest.mark.parametrize(

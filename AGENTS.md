@@ -62,4 +62,4 @@ pwsh -File llmwiki-inbox-ingest/tests/run-tests.ps1 -Case e2e_happy_path
 
 - `.venv` 在 `convert-with-mineru/` 下，勿修改
 - `convert-with-mineru/dist/` 是分发副本，gitignore 管理
-- `convert-with-mineru/mineru..env` 可能包含真实 token，视为隔离对象
+- `convert-with-mineru/mineru.env` 可能包含真实 token，视为隔离对象（dist 分发已排除该文件名）

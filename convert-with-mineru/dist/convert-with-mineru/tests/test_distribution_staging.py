@@ -134,3 +134,19 @@ def test_distribution_includes_sample_manifest_structure(tmp_path: Path):
 
     assert (staged / "examples" / "sample.manifest.json").exists()
     assert (staged / "scripts" / "mineru_manifest.py").exists()
+
+
+def test_build_distribution_tree_excludes_handwriting_task_packages(tmp_path: Path):
+    source = tmp_path / "skill"
+    source.mkdir()
+
+    (source / "SKILL.md").write_text("# skill\n", encoding="utf-8")
+    task_dir = source / "notes.handwriting-task"
+    (task_dir / "pages").mkdir(parents=True)
+    (task_dir / "task.json").write_text("{}", encoding="utf-8")
+    (task_dir / "pages" / "page-001.png").write_bytes(b"png")
+
+    staged = build_distribution_tree(source, tmp_path / "dist" / "stage")
+
+    assert (staged / "SKILL.md").exists()
+    assert staged.joinpath("notes.handwriting-task").exists() is False

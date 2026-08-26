@@ -35,7 +35,7 @@ PDF_TEXT_MARKERS = (b"/Font", b"BT", b"Tj", b"TJ", b"Tf", b"/ToUnicode")
 PDF_IMAGE_MARKERS = (b"/Subtype /Image", b"/Image", b"/XObject", b" Do")
 
 KNOWN_EXTENSIONS = MINERU_EXTENSIONS | UNSUPPORTED_EXTENSIONS
-OUTPUT_DIRECTORY_SUFFIXES = {".images", ".raw"}
+OUTPUT_DIRECTORY_SUFFIXES = {".images", ".raw", ".handwriting-task"}
 
 
 def _is_excluded(path: Path, excluded_roots: list[Path]) -> bool:
@@ -98,7 +98,7 @@ def is_probably_digital_pdf(path: Path, sniff_bytes: int = 512_000) -> bool:
     return False
 
 
-def route_file(path: Path, prefer_multimodal: bool = False) -> str:
+def route_file(path: Path) -> str:
     suffix = path.suffix.lower()
 
     if suffix in UNSUPPORTED_EXTENSIONS:
@@ -119,17 +119,12 @@ def route_file(path: Path, prefer_multimodal: bool = False) -> str:
     if suffix in {".htm", ".html"}:
         return "mineru_html"
 
-    if prefer_multimodal and suffix in {".pdf", ".png", ".jpg", ".jpeg", ".jp2", ".webp", ".gif", ".bmp"}:
-        return "multimodal_looker"
-
     return "mineru"
 
 
-def split_routed_inputs(
-    paths: list[Path], prefer_multimodal: bool = False
-) -> dict[str, list[Path]]:
+def split_routed_inputs(paths: list[Path]) -> dict[str, list[Path]]:
     routed: dict[str, list[Path]] = {}
     for path in paths:
-        route = route_file(path, prefer_multimodal=prefer_multimodal)
+        route = route_file(path)
         routed.setdefault(route, []).append(path)
     return routed

@@ -150,6 +150,10 @@ MinerU 生态中有两个不同的 token 变量，分别用于不同工具。本
 
 **不要给本 skill 配置 `MINERU_API_TOKEN`、`MINERU_MODEL`、`DEFAULT_MODEL` 或 `DEFAULT_MODE` 来尝试切换模型或路径**；这些都不是本 skill 读取的有效配置。
 
+## 手写管道依赖（无新增配置项）
+
+`--prefer-multimodal` 的手写校对管道不引入任何 LLM API 配置（视觉补充识别与语义修订由 agent 编排层承担，模型基准与角色契约见 `references/handwriting-transcription.md`）。管道唯一的额外运行时依赖是 `pymupdf`（PDF 页图本地渲染，150 DPI），已列入 `requirements.txt`。脚本零 LLM 密钥、零模型名配置。
+
 ## 禁止项
 
 - 不把真实 token 写进 `SKILL.md`
