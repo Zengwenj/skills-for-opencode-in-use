@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import io
 import json
+import re
 import shutil
 import time
 import zipfile
@@ -73,7 +74,9 @@ def classify_lifecycle_output(path: Path, source_id: str) -> ClassificationResul
         return ClassificationResult(status="pending_stub")
     if not markdown.strip():
         return ClassificationResult(status="empty")
-    if len(markdown.encode("utf-8")) > MIN_CONTENTFUL_BYTES and "#" not in markdown:
+    # LOCAL-PATCH 2026-09-09: 行首 ATX H1-H6 判定（原版任意 # 子串误判表格/URL锚点中的 #）
+    # 与 llmwiki-inbox-ingest Test-MarkdownHeading 规则对齐; 试点 20/20 闭环
+    if len(markdown.encode("utf-8")) > MIN_CONTENTFUL_BYTES and not re.search(r"(?m)^#{1,6}\s", markdown):
         return ClassificationResult(status="missing_heading_contentful")
     return ClassificationResult(status="done")
 

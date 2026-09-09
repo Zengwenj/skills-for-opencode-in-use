@@ -332,7 +332,10 @@ function Get-RawTargetPath {
 
 function Test-MarkdownHeading {
     param([Parameter(Mandatory = $true)][string]$Text)
-    return [regex]::IsMatch(($Text -replace "`r`n", "`n"), '(?m)^#\s+')
+    # LOCAL-PATCH 2026-09-09: 接受 ATX H1-H6（原版仅 H1 误拦 MinerU 对 pptx/pdf 合法 ## 输出）
+    # 验证: Z:/91_临时生成物/质量门测试/test-heading.ps1 (10/10); 试点 20/20 闭环
+    # 证据: Z:/llmwikivault/.omo/evidence/llmwiki-inbox-ingest-runs/20260909-*/evidence/
+    return [regex]::IsMatch(($Text -replace "`r`n", "`n"), '(?m)^#{1,6}\s')
 }
 
 function Test-ErrorPlaceholder {
