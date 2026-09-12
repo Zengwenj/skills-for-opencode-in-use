@@ -22,7 +22,13 @@ $script:Cases = @(
     'mineru_lifecycle_pending_resume',
     'mineru_missing_heading_contentful',
     'mineru_pending_stub',
-    'mineru_legacy_batch_rejected'
+    'mineru_legacy_batch_rejected',
+    'raw_journal_partial_resume',
+    'raw_journal_crash_recovery',
+    'raw_journal_plan_origin_divergent',
+    'raw_source_divergent_stops',
+    'raw_manifest_merge_append',
+    'raw_image_dedupe_md_bytes'
 )
 
 function Write-TestResult {

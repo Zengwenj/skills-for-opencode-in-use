@@ -7,6 +7,7 @@ import os
 import time
 import zipfile
 from dataclasses import dataclass, field
+from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -71,8 +72,33 @@ class RunInput:
     poll_interval_seconds: int = 0
 
 
+def _default_ledger_document() -> dict[str, Json]:
+    # 契约 §1：runner 加固后 LifecycleRunConfig 必须携带额度账本路径（fail-closed），
+    # 既有用例统一注入一份当日未用的合法账本。
+    # 2026-09-12：daily_page_limit 改为 1000——runner 已按用户硬约束加 1000 上限校验，
+    # 超限账本一律 QuotaGateError（防手改账本放宽），夹具不得再使用 10000。
+    return {
+        "schema_version": 1,
+        "epoch": {
+            "service_timezone_known": True,
+            "epoch_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+            "epoch_reset_basis": "user_configured",
+            "daily_page_limit": 1000,
+        },
+        "billing_basis": "per_page",
+        "reserved_pages": 0,
+        "consumed_pages": 0,
+        "uncertain_pages": 0,
+        "entries": [],
+    }
+
+
 def _run_lifecycle(run: RunInput):
     module = importlib.import_module("scripts.mineru_lifecycle_runner")
+
+    ledger_path = run.tmp_path / "audit" / "quota-ledger.json"
+    ledger_path.parent.mkdir(parents=True, exist_ok=True)
+    ledger_path.write_text(json.dumps(_default_ledger_document()), encoding="utf-8")
 
     config = module.LifecycleRunConfig(
         sources=[module.LifecycleSource(source_id=source_id, path=path) for source_id, path in run.sources],
@@ -83,6 +109,7 @@ def _run_lifecycle(run: RunInput):
         client=run.client,
         max_poll_seconds=run.max_poll_seconds,
         poll_interval_seconds=run.poll_interval_seconds,
+        quota_ledger_path=ledger_path,
     )
     return module.run_lifecycle(config)
 
@@ -179,8 +206,10 @@ def test_runner_persists_batch_and_task_state_after_submission(tmp_path: Path):
     _run_lifecycle(RunInput(tmp_path, sources, client, max_poll_seconds=1))
 
     state = [json.loads(line) for line in (tmp_path / "audit" / "lifecycle-state.jsonl").read_text(encoding="utf-8").splitlines()]
-    assert state[0]["batch_id"] == "batch-1"
-    assert state[0]["task_id"] == f"task-{SOURCE_ID}"
+    # 契约 §5 加固后首行为 submitting intent（无 batch_id）；batch 与 task 持久化在 uploaded 行
+    uploaded = [record for record in state if record.get("status") == "uploaded"]
+    assert uploaded[-1]["batch_id"] == "batch-1"
+    assert uploaded[-1]["task_id"] == f"task-{SOURCE_ID}"
 
 
 def _fake_monotonic(*values: float):
