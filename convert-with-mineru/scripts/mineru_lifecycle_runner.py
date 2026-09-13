@@ -525,6 +525,8 @@ def _append_state(
     source_sha256: str | None = None,
     reserved_pages: int | None = None,
     quota_epoch: str | None = None,
+    total_pages: int | None = None,
+    extracted_pages: int | None = None,
     ts: str | None = None,
     fsync: bool = False,
 ) -> None:
@@ -543,6 +545,12 @@ def _append_state(
         payload["reserved_pages"] = reserved_pages
     if quota_epoch is not None:
         payload["quota_epoch"] = quota_epoch
+    # 服务端真实页数（extract_progress 仅 state=running 时返回，done 后消失）——
+    # 首次观测即持久化，供配额对账与计费口径校准（B7）
+    if total_pages is not None:
+        payload["total_pages"] = total_pages
+    if extracted_pages is not None:
+        payload["extracted_pages"] = extracted_pages
     if task_id is not None:
         payload["task_id"] = task_id
     if error is not None:
@@ -838,6 +846,7 @@ def _poll_batch(
     deadline = time.monotonic() + config.max_poll_seconds
     pending = {source.source_id: source for source in sources}
     task_ids: dict[str, str] = {}
+    seen_progress: set[str] = set()
 
     while pending:
         try:
@@ -863,6 +872,22 @@ def _poll_batch(
             state = _text(item.get("state"))
             task_ids[source_id] = _text(item.get("task_id"))
             attempt_id = _text(attempts.get(source_id))
+            # B7 校准：extract_progress.total_pages 仅 running 期可见，首次观测即落盘
+            progress = _mapping(item.get("extract_progress"))
+            observed_total = progress.get("total_pages")
+            if (
+                state in ("running", "converting", "pending")
+                and isinstance(observed_total, int) and not isinstance(observed_total, bool)
+                and source_id not in seen_progress
+            ):
+                seen_progress.add(source_id)
+                extracted = progress.get("extracted_pages")
+                _append_state(
+                    config.state_path, source_id, batch_id, task_ids.get(source_id), "running",
+                    attempt_id=attempt_id,
+                    total_pages=observed_total,
+                    extracted_pages=extracted if isinstance(extracted, int) and not isinstance(extracted, bool) else None,
+                )
             if state == "done":
                 _complete_done_item(config, source, batch_id, item, results, attempt_id)
                 pending.pop(source_id)

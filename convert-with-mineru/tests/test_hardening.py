@@ -962,3 +962,42 @@ def test_partial_drop_rebuilds_post_payload_and_reservation(tmp_path: Path):
     assert ledger["entries"][0]["state"] == "confirmed"
     assert ledger["consumed_pages"] == 7
     assert results[src_a.source_id].status == module.STATUS_MANUAL_RECONCILE
+
+
+def test_running_progress_total_pages_persisted(tmp_path: Path):
+    """B7 校准：running 期 extract_progress.total_pages 首次观测即落盘（done 后该字段消失）。"""
+    src = _source(tmp_path, pages=3)
+    url = "https://cdn.example/full.zip"
+    client = FakeClient(
+        upload_responses=[_upload_response("batch-1", [SOURCE_ID])],
+        poll_responses=[
+            _poll_response(SOURCE_ID, "running"),
+            _poll_response(SOURCE_ID, "done", full_zip_url=url),
+        ],
+        zip_by_url={url: _zip_bytes({"full.md": b"# Done\n"})},
+    )
+    # 在 running 响应中注入 extract_progress
+    client.poll_responses[0]["data"]["extract_result"][0]["extract_progress"] = {
+        "total_pages": 7, "extracted_pages": 2,
+    }
+    ledger_path = _write_ledger(tmp_path, _ledger_document())
+    config = module.LifecycleRunConfig(
+        sources=[src],
+        output_root=tmp_path / "out",
+        audit_dir=tmp_path / "audit",
+        state_path=_state_path(tmp_path),
+        token=FAKE_TOKEN,
+        client=client,
+        max_poll_seconds=5,
+        poll_interval_seconds=0,
+        quota_ledger_path=ledger_path,
+    )
+    summary = module.run_lifecycle(config)
+
+    assert summary.items[0].status == "done"
+    records = [json.loads(line) for line in _state_path(tmp_path).read_text(encoding="utf-8").splitlines()]
+    progress_rows = [r for r in records if r.get("status") == "running"]
+    assert len(progress_rows) == 1, "running 进度只落盘一次"
+    assert progress_rows[0]["total_pages"] == 7
+    assert progress_rows[0]["extracted_pages"] == 2
+    assert progress_rows[0].get("batch_id") == "batch-1"
