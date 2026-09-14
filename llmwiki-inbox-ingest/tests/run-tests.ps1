@@ -28,7 +28,8 @@ $script:Cases = @(
     'raw_journal_plan_origin_divergent',
     'raw_source_divergent_stops',
     'raw_manifest_merge_append',
-    'raw_image_dedupe_md_bytes'
+    'raw_image_dedupe_md_bytes',
+    'text_source_local_ingest'
 )
 
 function Write-TestResult {

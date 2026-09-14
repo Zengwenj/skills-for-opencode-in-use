@@ -412,7 +412,7 @@ function Get-RawStatusForError {
 function Get-FailureStage {
     param([Parameter(Mandatory = $true)][string]$ErrorCode)
 
-    if ($ErrorCode -in @('quality_failed', 'missing_heading_contentful', 'raw_path_escape', 'raw_write_failed', 'raw_target_divergent', 'raw_origin_divergent', 'raw_content_divergent', 'raw_plan_disk_mismatch', 'raw_plan_origin_divergent', 'raw_plan_content_divergent', 'image_name_conflict')) { return 'raw' }
+    if ($ErrorCode -in @('quality_failed', 'missing_heading_contentful', 'raw_path_escape', 'raw_write_failed', 'raw_target_divergent', 'raw_origin_divergent', 'raw_content_divergent', 'raw_plan_disk_mismatch', 'raw_plan_origin_divergent', 'raw_plan_content_divergent', 'image_name_conflict', 'text_source_missing', 'text_source_changed')) { return 'raw' }
     return 'mineru'
 }
 
@@ -1053,6 +1053,170 @@ try {
                         collision_suffix = $null
                         status           = Get-RawStatusForError -ErrorCode $errorCode
                         message          = $message
+                    })
+            }
+        }
+
+        # ---- 本地文本路由（text_source）：不经 MinerU，直接从已归档文本生成 raw markdown ----
+        # 背景：build-proposal 对 .txt/.md 标记 text_source + enter_raw_sources=true，
+        # prepare-mineru-batch 按设计跳过（非 MinerU 候选），此前无任何脚本消费该路由 → raw 永不落盘。
+        # 本分支补齐：复用同一套 frontmatter/journal 三分支幂等/原子落盘，内容哈希=归一化文本重建结果。
+        foreach ($planItem in @($planItems)) {
+            $planReasons = @()
+            if ($null -ne $planItem.reason_codes) { $planReasons = @($planItem.reason_codes | ForEach-Object { [string]$_ }) }
+            if ($planReasons -notcontains 'text_source') { continue }
+            if (-not [bool]$planItem.enter_raw_sources) { continue }
+            $sourceId = [string]$planItem.source_id
+            if ($batchSourceIds -contains $sourceId) { continue }  # 已由 MinerU 批次循环处理
+
+            $errorCode = $null
+            $message = ''
+            $nextAction = ''
+            $archivePath = ''
+
+            if (-not $latestApply.ContainsKey($sourceId)) {
+                $errorCode = 'source_id_mismatch'
+                $message = 'text source has no matching apply-manifest entry'
+            } elseif (-not ($script:CommittedStates -contains [string]$latestApply[$sourceId].state)) {
+                $errorCode = 'source_not_committed'
+                $message = 'text source does not point at a committed apply-manifest state'
+            } else {
+                $archivePath = [System.IO.Path]::GetFullPath([string]$latestApply[$sourceId].archive_path)
+                if (-not (Test-Path -LiteralPath $archivePath -PathType Leaf)) {
+                    $errorCode = 'text_source_missing'
+                    $message = "committed text source is missing on disk: $archivePath"
+                } elseif (-not (Get-FileHash -Algorithm SHA256 -LiteralPath $archivePath).Hash.ToLowerInvariant().Equals([string]$latestApply[$sourceId].archive_sha256, [System.StringComparison]::OrdinalIgnoreCase)) {
+                    $errorCode = 'text_source_changed'
+                    $message = 'committed text source hash differs from apply-manifest archive_sha256'
+                }
+            }
+
+            $rawTargetPath = ''
+            if ($null -eq $errorCode) {
+                $sourceText = [System.IO.File]::ReadAllText($archivePath, [System.Text.Encoding]::UTF8)
+                # 归一化行尾，保证同输入下内容哈希字节稳定（幂等前提）
+                $sourceText = ($sourceText -replace "`r`n", "`n") -replace "`r", "`n"
+                $extension = [System.IO.Path]::GetExtension($archivePath).ToLowerInvariant()
+                $stem = [System.IO.Path]::GetFileNameWithoutExtension($archivePath)
+                # .md 保持原文（自带结构）；.txt 补一行标题，满足 raw 质量门的标题要求
+                $rawBody = if ($extension -eq '.md') { $sourceText } else { "# $stem`n`n$sourceText" }
+                $textBatchItem = [pscustomobject]@{ source_id = $sourceId }
+
+                $journalEvent = if ($rawJournalLatest.ContainsKey($sourceId)) { $rawJournalLatest[$sourceId] } else { $null }
+                $journalState = [string](Get-ObjectPropertyValue -Object $journalEvent -Name 'state')
+                $journalTargetStable = [string](Get-ObjectPropertyValue -Object $journalEvent -Name 'target_path')
+                $journalHash = [string](Get-ObjectPropertyValue -Object $journalEvent -Name 'content_sha256')
+
+                # 幂等要点：已落盘时必须复用原 parsed_date 重建内容，否则时间戳漂移会被判 divergent
+                $existingTarget = ''
+                if (-not [string]::IsNullOrWhiteSpace($journalTargetStable)) {
+                    $existingTarget = [System.IO.Path]::GetFullPath($journalTargetStable.Replace('/', [System.IO.Path]::DirectorySeparatorChar))
+                }
+                $preservedParsedDate = if (-not [string]::IsNullOrWhiteSpace($existingTarget)) {
+                    [string](Get-RawFrontmatterValue -Path $existingTarget -Name 'parsed_date')
+                } else { '' }
+                $rawMarkdown = New-FrontmatterMarkdown -BatchItem $textBatchItem -ApplyEntry $latestApply[$sourceId] -PlanItem $planItem -Markdown $rawBody -ParsedDate $preservedParsedDate
+                $rawHash = Get-TextSha256Hex -Text $rawMarkdown
+
+                if ($journalState -eq 'written' -and -not [string]::IsNullOrWhiteSpace($existingTarget)) {
+                    $journalTarget = $existingTarget
+                    if (-not (Test-PathWithinRoot -Candidate $journalTarget -Root ([string]$config.RawSourcesRoot))) {
+                        $errorCode = 'raw_path_escape'; $message = 'journal target_path escapes rawSourcesRoot'
+                    } elseif (-not (Test-Path -LiteralPath $journalTarget -PathType Leaf)) {
+                        $errorCode = 'raw_target_divergent'; $message = "journal says written but raw target is missing: $journalTargetStable"
+                    } elseif (-not (Get-FileHash -Algorithm SHA256 -LiteralPath $journalTarget).Hash.ToLowerInvariant().Equals($journalHash, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $errorCode = 'raw_target_divergent'; $message = 'raw target on disk no longer matches journal content hash'
+                    } elseif (-not $rawHash.Equals($journalHash, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $errorCode = 'raw_content_divergent'; $message = 'same text source produced different raw content than the journal record'
+                    } else {
+                        $rawTargetPath = $journalTarget
+                        $currentRawRows.Add([ordered]@{
+                                source_id = $sourceId; run_id = [string]$config.RunId
+                                archive_path = Convert-ToStablePath -Path $archivePath
+                                archive_sha256 = ([string]$latestApply[$sourceId].archive_sha256).ToLowerInvariant()
+                                raw_path = Convert-ToStablePath -Path $journalTarget; raw_sha256 = $journalHash
+                                collision_suffix = $null; status = 'skipped'
+                                message = 'skipped_idempotent_written (local text)'
+                            })
+                    }
+                } elseif ($journalState -eq 'planned' -and -not [string]::IsNullOrWhiteSpace($existingTarget) -and (Test-Path -LiteralPath $existingTarget -PathType Leaf)) {
+                    # 崩溃于"已落盘未记 written"：反向核验后补记，不重写
+                    $journalTarget = $existingTarget
+                    if (-not (Test-PathWithinRoot -Candidate $journalTarget -Root ([string]$config.RawSourcesRoot))) {
+                        $errorCode = 'raw_path_escape'; $message = 'journal target_path escapes rawSourcesRoot'
+                    } elseif (-not (Get-FileHash -Algorithm SHA256 -LiteralPath $journalTarget).Hash.ToLowerInvariant().Equals($journalHash, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $errorCode = 'raw_plan_disk_mismatch'; $message = 'planned raw target exists with a different content hash'
+                    } elseif (-not $rawHash.Equals($journalHash, [System.StringComparison]::OrdinalIgnoreCase)) {
+                        $errorCode = 'raw_plan_content_divergent'; $message = 'current text source regenerates different content than the journal plan'
+                    } else {
+                        Add-RawJournalEvent -Path $rawJournalPath -SourceId $sourceId -TargetPath $journalTargetStable -ContentSha256 $journalHash -State 'written'
+                        $rawTargetPath = $journalTarget
+                        $currentRawRows.Add([ordered]@{
+                                source_id = $sourceId; run_id = [string]$config.RunId
+                                archive_path = Convert-ToStablePath -Path $archivePath
+                                archive_sha256 = ([string]$latestApply[$sourceId].archive_sha256).ToLowerInvariant()
+                                raw_path = Convert-ToStablePath -Path $journalTarget; raw_sha256 = $journalHash
+                                collision_suffix = $null; status = 'written'
+                                message = 'raw recovered from journal plan verification (local text)'
+                            })
+                    }
+                } else {
+                    $target = Get-RawTargetPath -RawSourcesRoot ([string]$config.RawSourcesRoot) -Theme ([string]$planItem.target_theme) -Year ([int]$planItem.target_year) -ArchivePath $archivePath
+                    if (-not (Test-PathWithinRoot -Candidate ([string]$target.Path) -Root ([string]$config.RawSourcesRoot))) {
+                        $errorCode = 'raw_path_escape'; $message = 'computed raw target path escapes rawSourcesRoot'
+                    } else {
+                        $freshMarkdown = New-FrontmatterMarkdown -BatchItem $textBatchItem -ApplyEntry $latestApply[$sourceId] -PlanItem $planItem -Markdown $rawBody
+                        $freshHash = Get-TextSha256Hex -Text $freshMarkdown
+                        Add-RawJournalEvent -Path $rawJournalPath -SourceId $sourceId -TargetPath (Convert-ToStablePath -Path ([string]$target.Path)) -ContentSha256 $freshHash -State 'planned'
+                        try {
+                            $null = Write-RawTextAtomic -TargetPath ([string]$target.Path) -Text $freshMarkdown -ExpectedSha256 $freshHash
+                            Add-RawJournalEvent -Path $rawJournalPath -SourceId $sourceId -TargetPath (Convert-ToStablePath -Path ([string]$target.Path)) -ContentSha256 $freshHash -State 'written'
+                            $rawTargetPath = [string]$target.Path
+                            $currentRawRows.Add([ordered]@{
+                                    source_id = $sourceId; run_id = [string]$config.RunId
+                                    archive_path = Convert-ToStablePath -Path $archivePath
+                                    archive_sha256 = ([string]$latestApply[$sourceId].archive_sha256).ToLowerInvariant()
+                                    raw_path = Convert-ToStablePath -Path ([string]$target.Path); raw_sha256 = $freshHash
+                                    collision_suffix = if ([string]::IsNullOrWhiteSpace([string]$target.Suffix)) { $null } else { [string]$target.Suffix }
+                                    status = 'written'; message = 'raw written from local text source (no MinerU)'
+                                })
+                        } catch {
+                            $errorCode = 'raw_write_failed'; $message = "atomic raw write failed: $($_.Exception.Message)"
+                        }
+                    }
+                }
+            }
+
+            $parseRows.Add([ordered]@{
+                    source_id = $sourceId
+                    run_id = [string]$config.RunId
+                    archive_path = if ([string]::IsNullOrWhiteSpace($archivePath)) { '' } else { Convert-ToStablePath -Path $archivePath }
+                    archive_sha256 = ([string]$latestApply[$sourceId].archive_sha256).ToLowerInvariant()
+                    route = 'text_source'
+                    status = Get-ParseStatusForError -ErrorCode $errorCode
+                    output_path = if (-not [string]::IsNullOrWhiteSpace($rawTargetPath)) { Convert-ToStablePath -Path $rawTargetPath } else { $null }
+                    content_bytes = if (-not [string]::IsNullOrWhiteSpace($rawTargetPath)) { (Get-Item -LiteralPath $rawTargetPath).Length } else { 0 }
+                    has_heading = $true
+                    validation_flags = ''
+                    error_type = $errorCode
+                    retry_count = 0
+                })
+
+            if ($null -ne $errorCode) {
+                if ([string]::IsNullOrWhiteSpace($nextAction)) { $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $null }
+                $failureRows.Add([ordered]@{
+                        run_id = [string]$config.RunId; source_id = $sourceId
+                        stage = Get-FailureStage -ErrorCode $errorCode; error_code = $errorCode
+                        message = $message; retryable = (Test-RetryableError -ErrorCode $errorCode)
+                        next_action = $nextAction
+                        artifact_path = if ([string]::IsNullOrWhiteSpace($archivePath)) { '' } else { Convert-ToStablePath -Path $archivePath }
+                    })
+                $currentRawRows.Add([ordered]@{
+                        source_id = $sourceId; run_id = [string]$config.RunId
+                        archive_path = if ([string]::IsNullOrWhiteSpace($archivePath)) { '' } else { Convert-ToStablePath -Path $archivePath }
+                        archive_sha256 = ([string]$latestApply[$sourceId].archive_sha256).ToLowerInvariant()
+                        raw_path = ''; raw_sha256 = ''; collision_suffix = $null
+                        status = Get-RawStatusForError -ErrorCode $errorCode; message = $message
                     })
             }
         }
