@@ -191,9 +191,10 @@ These are EXPLICITLY DIFFERENT and must never be conflated.
 
 ### `missing_heading_contentful`
 
-- Output has substantial content (>= configurable minimum byte threshold, default: 500 bytes) but no `#` heading.
+- Output has content above the near-empty floor (default: 150 bytes) but no `#` heading.
 - This is a review/normalization bucket. The content may be valid but missing structure (e.g. scanned image descriptions, tables without headings).
 - It is NOT empty output and NOT a `pending_stub`.
+- Non-terminal: adding a heading and re-running ingest admits it.
 - Action: flag for review, route to a normalization queue, but do NOT reject as failed.
 
 ## Committed-Only Batch Rules
@@ -290,7 +291,8 @@ run/mineru-output/<source_id>/<source_id>.images/  (when images present)
 Mock mode is for fixture testing only. No real MinerU API calls, no MCP:
 
 - Normal markdown (written to `<source_id>.md`) goes to raw.
-- Bad markdown (no heading, < 500 bytes, contains error placeholder) goes to failures.
+- Bad markdown (no heading, near-empty <= 150 bytes, contains error placeholder) goes to failures.
+- Thin markdown (> 150 and <= 500 bytes) with a heading is written to raw and tagged `thin_content`.
 - Raw collision uses suffix.
 - `source_id` mismatch goes to failures.
 

@@ -55,6 +55,9 @@ $script:RequiredForbiddenProcessors = @('mcp', 'agent_lightweight_api', 'flash',
 $script:PendingLifecycleStatuses = @('prepared', 'submitted', 'uploaded', 'waiting-file', 'pending', 'running', 'converting', 'pending_timeout', 'stale_pending')
 $script:ParseStatuses = @('parsed', 'failed', 'skipped', 'pending', 'pending_stub', 'quality_failed', 'missing_heading_contentful')
 $script:RawStatuses = @('written', 'skipped', 'failed', 'pending', 'pending_stub', 'quality_failed', 'missing_heading_contentful')
+# 与 ingest-mineru-output.ps1 同源的内容量分档（2026-09-15 起）：近空下限；薄内容放行、仅标记
+$script:MinContentBytes = 500
+$script:NearEmptyContentBytes = 150
 $script:SnapshotFields = @('source_id', 'rel_path', 'abs_path', 'sha256', 'size', 'mtime', 'exists')
 $script:DiffFields = @('source_id', 'rel_path', 'before_sha256', 'after_sha256', 'change_type', 'allowed')
 $script:ParseFields = @('source_id', 'run_id', 'archive_path', 'archive_sha256', 'route', 'status', 'output_path', 'content_bytes', 'has_heading', 'retry_count')
@@ -678,11 +681,27 @@ function Test-MineruBatch {
     return [pscustomobject]@{ Valid = $valid; Batch = $batch }
 }
 
+function Get-LatestRowsBySourceId {
+    param([Parameter(Mandatory = $true)][object[]]$Rows)
+
+    # manifest 为合并追加（保留历史行），判定以**每个 source_id 的最后一行**为准——
+    # 与 raw-journal.jsonl 的 "latest 生效" 语义一致，否则"修复后重跑"的补救流程永远无法收口。
+    $order = [System.Collections.Generic.List[string]]::new()
+    $latest = @{}
+    foreach ($row in $Rows) {
+        $sid = [string]$row.source_id
+        if (-not $latest.ContainsKey($sid)) { $order.Add($sid) }
+        $latest[$sid] = $row
+    }
+    return @($order | ForEach-Object { $latest[$_] })
+}
+
 function Test-ParseManifest {
     param([Parameter(Mandatory = $true)][string]$Path)
 
     $csv = Read-CsvRowsForValidation -Path $Path -RequiredFields $script:ParseFields -ArtifactName 'parse-manifest.csv'
     $valid = [bool]$csv.Valid
+    # 结构自洽检查覆盖全部历史行（合并追加保留旧行，逐行仍需自洽）
     foreach ($row in @($csv.Rows)) {
         $status = [string]$row.status
         $contentBytes = [int64]$row.content_bytes
@@ -728,13 +747,19 @@ function Test-ParseManifest {
         }
 
         if ($status -eq 'missing_heading_contentful') {
-            if ($contentBytes -le 500 -or ([string]$row.has_heading).Equals('true', [System.StringComparison]::OrdinalIgnoreCase)) {
-                Write-ValidationError -What 'missing_heading_contentful row is not contentful no-heading output' -Where "$Path -> $($row.source_id).status" -Expected 'content_bytes > 500 and has_heading=false' -Fix 'Use quality_failed for empty/short output or parsed for heading-bearing output.'
+            if ($contentBytes -le $script:NearEmptyContentBytes -or ([string]$row.has_heading).Equals('true', [System.StringComparison]::OrdinalIgnoreCase)) {
+                Write-ValidationError -What 'missing_heading_contentful row is not contentful no-heading output' -Where "$Path -> $($row.source_id).status" -Expected "content_bytes > $($script:NearEmptyContentBytes) and has_heading=false" -Fix 'Use quality_failed for near-empty/placeholder output or parsed for heading-bearing output.'
                 $valid = $false
             }
         }
 
-        if ($status -eq 'failed' -and [string]$row.validation_flags -match 'missing_heading' -and $contentBytes -gt 500) {
+    }
+
+    # 终态以每个 source_id 的最新行为准：历史 failed 行若已被补救（后续行为 parsed/skipped）不再阻断收口
+    foreach ($row in @(Get-LatestRowsBySourceId -Rows @($csv.Rows))) {
+        $status = [string]$row.status
+        $contentBytes = [int64]$row.content_bytes
+        if ($status -eq 'failed' -and [string]$row.validation_flags -match 'missing_heading' -and $contentBytes -gt $script:NearEmptyContentBytes) {
             Write-ValidationError -What 'contentful missing-heading output was mixed with failed' -Where "$Path -> $($row.source_id).status" -Expected 'missing_heading_contentful' -Fix 'Regenerate parse-manifest.csv with distinct missing_heading_contentful classification.'
             $valid = $false
         }
@@ -750,6 +775,7 @@ function Test-RawManifest {
     $valid = [bool]$csv.Valid
     $writtenCount = 0
     $nonTerminalCount = 0
+    # 结构自洽与盘上核验覆盖全部历史行（合并追加保留旧行）
     foreach ($row in @($csv.Rows)) {
         $status = [string]$row.status
         if ($status -notin $script:RawStatuses) {
@@ -758,7 +784,6 @@ function Test-RawManifest {
         }
 
         if ($status -eq 'written') {
-            $writtenCount++
             if (-not (Test-Sha256Text -Value ([string]$row.archive_sha256) -Where "$Path -> $($row.source_id).archive_sha256")) { $valid = $false }
             if (-not (Test-Sha256Text -Value ([string]$row.raw_sha256) -Where "$Path -> $($row.source_id).raw_sha256")) { $valid = $false }
             $rawPath = [string]$row.raw_path
@@ -773,11 +798,13 @@ function Test-RawManifest {
                 }
             }
         }
+    }
 
-        if ($status -in @('pending', 'pending_stub', 'missing_heading_contentful')) {
-            $nonTerminalCount++
-        }
-
+    # 存在性与终态以每个 source_id 的最新行为准（skipped = 幂等跳过，等价于该 source 已写入）
+    foreach ($row in @(Get-LatestRowsBySourceId -Rows @($csv.Rows))) {
+        $status = [string]$row.status
+        if ($status -in @('written', 'skipped')) { $writtenCount++ }
+        if ($status -in @('pending', 'pending_stub', 'missing_heading_contentful')) { $nonTerminalCount++ }
         if ($status -eq 'quality_failed') {
             Write-ValidationError -What 'raw-output-manifest contains terminal quality_failed row' -Where "$Path -> $($row.source_id).status" -Expected 'Fix or regenerate quality-failed output before completed-run validation' -Fix 'Inspect failures.csv next_action and rerun ingest after remediation.'
             $valid = $false

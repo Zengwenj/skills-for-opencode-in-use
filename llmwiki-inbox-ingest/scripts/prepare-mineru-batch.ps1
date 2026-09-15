@@ -373,14 +373,19 @@ try {
         }
         quality_gate_policy     = [ordered]@{
             min_content_bytes = 500
+            near_empty_content_bytes = 150
             pending_stub = [ordered]@{
                 status = 'pending_stub'
                 action = 'resubmit_or_extend_poll_timeout'
             }
             missing_heading_contentful = [ordered]@{
                 status = 'missing_heading_contentful'
-                min_content_bytes = 500
+                min_content_bytes = 150
                 action = 'review_or_normalize_heading'
+            }
+            thin_content = [ordered]@{
+                flag = 'thin_content'
+                action = 'written_with_flag_triage_later'
             }
         }
         items                   = @($batchItems)

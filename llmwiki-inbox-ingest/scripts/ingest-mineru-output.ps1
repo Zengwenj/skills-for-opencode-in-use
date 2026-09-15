@@ -35,6 +35,11 @@ $script:ErrorPlaceholders = @(
 )
 $script:PendingLifecycleStatuses = @('prepared', 'submitted', 'uploaded', 'waiting-file', 'pending', 'running', 'converting', 'pending_timeout', 'stale_pending')
 $script:NonTerminalStatuses = @('pending', 'pending_stub', 'missing_heading_contentful')
+# 内容量分档（2026-09-15 起）：正常量级 / 薄内容（放行+标记）/ 近空（拦截）
+# 背景：一批 28 件里有 2 件是内容确实很短的完整文档（4 行申请函 272 字节、流程图 181 字节），
+# 旧规则"≤500 字节即 quality_failed"把完整文档误判为解析失败。近空（解析几乎没抽出东西）才是真缺陷信号。
+$script:MinContentBytes = 500
+$script:NearEmptyContentBytes = 150
 
 function Write-IngestError {
     param(
@@ -832,15 +837,21 @@ try {
                         $message = 'MinerU markdown is the pending placeholder stub, not a parsed output'
                         $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $lifecycleNextAction
                     } else {
-                        if ($contentBytes -le 500) { $validationFlags.Add('content_bytes_le_500') }
+                        $hasPlaceholder = Test-ErrorPlaceholder -Text $markdown
+                        if ($contentBytes -le $script:NearEmptyContentBytes) {
+                            $validationFlags.Add('near_empty_content')
+                        } elseif ($contentBytes -le $script:MinContentBytes) {
+                            # 薄内容但完整：放行写入，仅标记，供后续 triage（不阻断收口）
+                            $validationFlags.Add('thin_content')
+                        }
                         if (-not $hasHeading) { $validationFlags.Add('missing_heading') }
-                        if (Test-ErrorPlaceholder -Text $markdown) { $validationFlags.Add('error_placeholder') }
+                        if ($hasPlaceholder) { $validationFlags.Add('error_placeholder') }
 
-                        if ($contentBytes -gt 500 -and -not $hasHeading -and -not (Test-ErrorPlaceholder -Text $markdown)) {
+                        if ($contentBytes -gt $script:NearEmptyContentBytes -and -not $hasHeading -and -not $hasPlaceholder) {
                             $errorCode = 'missing_heading_contentful'
                             $message = 'MinerU markdown has content but no Markdown heading; route to normalization review'
                             $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $null
-                        } elseif ($validationFlags.Count -gt 0) {
+                        } elseif ($validationFlags -contains 'near_empty_content' -or $hasPlaceholder) {
                             $errorCode = 'quality_failed'
                             $message = 'MinerU markdown failed raw quality gate: ' + ($validationFlags -join ';')
                             $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $null
