@@ -24,6 +24,8 @@ $script:Cases = @(
     'mineru_thin_missing_heading',
     'mineru_thin_content_admitted',
     'mineru_near_empty_rejected',
+    'mineru_near_empty_image_missing',
+    'mineru_image_only_admitted',
     'mineru_quality_failed_then_remediated',
     'mineru_pending_stub',
     'mineru_legacy_batch_rejected',

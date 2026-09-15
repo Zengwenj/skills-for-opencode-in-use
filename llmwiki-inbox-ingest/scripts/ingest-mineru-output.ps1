@@ -40,6 +40,10 @@ $script:NonTerminalStatuses = @('pending', 'pending_stub', 'missing_heading_cont
 # 旧规则"≤500 字节即 quality_failed"把完整文档误判为解析失败。近空（解析几乎没抽出东西）才是真缺陷信号。
 $script:MinContentBytes = 500
 $script:NearEmptyContentBytes = 150
+# 图片型文档（2026-09-15 起）：正文本身是整页扫描图，Markdown 文本必然近空但解析是完整的。
+# 判据=文本近空 且 Markdown 引用了盘上真实存在且不小于此阈值的本地图片（排除装饰性小图）。
+# 这类件按"薄内容"同样放行+标记，不判 quality_failed——近空拦截只针对"真没抽出东西"。
+$script:ImageOnlyMinImageBytes = 10240
 
 function Write-IngestError {
     param(
@@ -617,6 +621,27 @@ function Find-MarkdownLocalImageRefs {
         } | Select-Object -Unique)
 }
 
+function Test-ImageOnlyContent {
+    param(
+        [Parameter(Mandatory = $true)][string]$Markdown,
+        [Parameter(Mandatory = $true)][string]$OutputDir,
+        [Parameter(Mandatory = $true)][string]$RunDir,
+        [Parameter(Mandatory = $true)][int]$MinImageBytes
+    )
+
+    foreach ($ref in @(Find-MarkdownLocalImageRefs -Text $Markdown)) {
+        $relative = $ref.Replace('/', [System.IO.Path]::DirectorySeparatorChar)
+        foreach ($baseDir in @($OutputDir, (Split-Path -Path $OutputDir -Parent))) {
+            $candidate = [System.IO.Path]::GetFullPath([System.IO.Path]::Combine($baseDir, $relative))
+            if (-not (Test-PathWithinRoot -Candidate $candidate -Root $RunDir)) { continue }
+            if (-not (Test-Path -LiteralPath $candidate -PathType Leaf)) { continue }
+            if ((Get-Item -LiteralPath $candidate).Length -ge $MinImageBytes) { return $true }
+        }
+    }
+
+    return $false
+}
+
 function Copy-RawImageAtomic {
     param(
         [Parameter(Mandatory = $true)][string]$SourcePath,
@@ -839,7 +864,12 @@ try {
                     } else {
                         $hasPlaceholder = Test-ErrorPlaceholder -Text $markdown
                         if ($contentBytes -le $script:NearEmptyContentBytes) {
-                            $validationFlags.Add('near_empty_content')
+                            if (Test-ImageOnlyContent -Markdown $markdown -OutputDir $outputDir -RunDir ([string]$config.RunDir) -MinImageBytes $script:ImageOnlyMinImageBytes) {
+                                # 图片型文档：正文是扫描图，文本近空属预期；放行写入并标记，供后续 triage
+                                $validationFlags.Add('image_only_content')
+                            } else {
+                                $validationFlags.Add('near_empty_content')
+                            }
                         } elseif ($contentBytes -le $script:MinContentBytes) {
                             # 薄内容但完整：放行写入，仅标记，供后续 triage（不阻断收口）
                             $validationFlags.Add('thin_content')

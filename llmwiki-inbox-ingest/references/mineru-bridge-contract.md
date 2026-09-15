@@ -292,6 +292,8 @@ Mock mode is for fixture testing only. No real MinerU API calls, no MCP:
 
 - Normal markdown (written to `<source_id>.md`) goes to raw.
 - Bad markdown (no heading, near-empty <= 150 bytes, contains error placeholder) goes to failures.
+  Exception: near-empty markdown that references an existing local image of >= 10 KB is an image-only document
+  (its body is a scanned page), so it is written to raw and tagged `image_only_content` instead of failing.
 - Thin markdown (> 150 and <= 500 bytes) with a heading is written to raw and tagged `thin_content`.
 - Raw collision uses suffix.
 - `source_id` mismatch goes to failures.

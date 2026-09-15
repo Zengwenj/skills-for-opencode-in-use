@@ -54,7 +54,9 @@ rawSourcesRoot/<theme>/<YYYY>/<safe_filename>.md
 1. Markdown 字节数按三档判定（2026-09-15 起；此前为"≤500 即失败"）：
    - `> 500`：正常量级。
    - `150 < x ≤ 500`（薄内容）：**放行写入**，在 `validation_flags` 记 `thin_content` 供后续 triage，不阻断收口。文档本身很短（如 4 行申请函、图片型流程图）不等于解析失败。
-   - `≤ 150`（近空）：判 `quality_failed`——解析几乎没抽出内容，才是真缺陷信号。
+   - `≤ 150`（近空）：默认判 `quality_failed`——解析几乎没抽出内容，才是真缺陷信号。
+     **例外（图片型文档）**：若 Markdown 引用了盘上真实存在且不小于 10 KB 的本地图片，说明正文本身就是整页扫描图、文本近空属预期而非解析失败，则改记 `image_only_content` 并**放行写入**。
+     引用的图片不存在或仅为装饰性小图时不适用该例外，仍判 `quality_failed`。
 2. 包含至少一个 Markdown heading（`# ` 开头）。该要求不因内容量分档而放宽：无标题但内容高于近空下限者进 `missing_heading_contentful`，走归一化路径（`review_or_normalize_heading`）。
 3. 不包含已知的 MinerU 错误占位文本（命中即 `quality_failed`，与内容量无关）。
 4. source_id 与 batch/parse/apply 一致。
