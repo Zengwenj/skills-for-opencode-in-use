@@ -863,8 +863,10 @@ try {
                         $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $lifecycleNextAction
                     } else {
                         $hasPlaceholder = Test-ErrorPlaceholder -Text $markdown
+                        $imageOnly = $false
                         if ($contentBytes -le $script:NearEmptyContentBytes) {
-                            if (Test-ImageOnlyContent -Markdown $markdown -OutputDir $outputDir -RunDir ([string]$config.RunDir) -MinImageBytes $script:ImageOnlyMinImageBytes) {
+                            $imageOnly = Test-ImageOnlyContent -Markdown $markdown -OutputDir $outputDir -RunDir ([string]$config.RunDir) -MinImageBytes $script:ImageOnlyMinImageBytes
+                            if ($imageOnly) {
                                 # 图片型文档：正文是扫描图，文本近空属预期；放行写入并标记，供后续 triage
                                 $validationFlags.Add('image_only_content')
                             } else {
@@ -877,7 +879,8 @@ try {
                         if (-not $hasHeading) { $validationFlags.Add('missing_heading') }
                         if ($hasPlaceholder) { $validationFlags.Add('error_placeholder') }
 
-                        if ($contentBytes -gt $script:NearEmptyContentBytes -and -not $hasHeading -and -not $hasPlaceholder) {
+                        if (-not $hasHeading -and -not $hasPlaceholder -and ($contentBytes -gt $script:NearEmptyContentBytes -or $imageOnly)) {
+                            # 含图片型：文本近空但无标题同样进归一化路径，不放行无标题的 raw
                             $errorCode = 'missing_heading_contentful'
                             $message = 'MinerU markdown has content but no Markdown heading; route to normalization review'
                             $nextAction = Get-NextActionForStatus -Status $errorCode -LifecycleNextAction $null
