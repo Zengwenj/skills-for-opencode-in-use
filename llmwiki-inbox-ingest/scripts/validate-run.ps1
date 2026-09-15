@@ -747,8 +747,11 @@ function Test-ParseManifest {
         }
 
         if ($status -eq 'missing_heading_contentful') {
-            if ($contentBytes -le $script:NearEmptyContentBytes -or ([string]$row.has_heading).Equals('true', [System.StringComparison]::OrdinalIgnoreCase)) {
-                Write-ValidationError -What 'missing_heading_contentful row is not contentful no-heading output' -Where "$Path -> $($row.source_id).status" -Expected "content_bytes > $($script:NearEmptyContentBytes) and has_heading=false" -Fix 'Use quality_failed for near-empty/placeholder output or parsed for heading-bearing output.'
+            # 图片型文档（validation_flags 含 image_only_content）文本本就近空，不受近空下限约束；
+            # 它仍必须无标题（有标题就该写 raw），故 has_heading=true 依旧判错。
+            $imageOnly = [string]$row.validation_flags -match 'image_only_content'
+            if ((-not $imageOnly -and $contentBytes -le $script:NearEmptyContentBytes) -or ([string]$row.has_heading).Equals('true', [System.StringComparison]::OrdinalIgnoreCase)) {
+                Write-ValidationError -What 'missing_heading_contentful row is not contentful no-heading output' -Where "$Path -> $($row.source_id).status" -Expected "content_bytes > $($script:NearEmptyContentBytes) and has_heading=false, or image_only_content with has_heading=false" -Fix 'Use quality_failed for near-empty/placeholder output or parsed for heading-bearing output.'
                 $valid = $false
             }
         }
