@@ -9,6 +9,7 @@ planned → copied_temp → committed
                       → failed
                       → failed_partial_deleted
 planned → skipped_existing_committed
+planned → skipped_equivalent_content
 planned → preflight_failed
         → failed_divergent
 ```
@@ -22,15 +23,30 @@ planned → preflight_failed
 | `committed` | temp 通过 SHA256 验证，已原子 rename 为 final |
 | `failed` | 处理失败，已清理 partial |
 | `skipped_existing_committed` | 目标已存在且 hash 匹配，跳过 |
+| `skipped_equivalent_content` | 目标已存在、字节不同、但**文本层完全一致**（同文不同壳，如字体嵌入差异），视为该内容已归档：不复制、不产出 raw |
 
 ### 扩展状态
 
 | 状态 | 含义 |
 | --- | --- |
-| `preflight_failed` | apply 前检查失败（source 变化、target 存在等） |
+| `preflight_failed` | apply 前检查失败（source 变化、target 存在且非等价等） |
 | `verified_temp` | temp 已通过 SHA256 验证，等待 rename |
 | `failed_partial_deleted` | temp 验证失败，已删除 partial copy |
 | `failed_divergent` | 幂等重跑时发现 divergence，拒绝处理 |
+
+## 同文不同壳（等价内容）判定
+
+目标路径已存在时，apply 先判"是否同一内容"：
+
+1. 扩展名必须相同，且属于**可比格式**：`.docx`、`.xlsx`、`.xlsm`（zip 容器，可可靠取文本层）。
+2. 取双方的文本层（`.docx` 取 `word/document.xml` 的 `<w:t>`；表格类取 `xl/sharedStrings.xml` 与各 worksheet 的 `<t>`），
+   **去掉全部空白后逐字比较**。
+3. 完全相同 ⇒ 记 `skipped_equivalent_content`，不复制、不再产出 raw（内容已在库内，重解析不增加知识）。
+4. 任一条件不满足（格式不可比、任一侧取不到文本、文本不同）⇒ 维持 fail-closed，记 `preflight_failed` + `target_exists`，
+   交人工裁决。不猜测、不合并、不覆盖。
+
+> 该状态不是"放行"而是"该内容已存在"：其 `archive_sha256` 记录的是**库内既有文件**的实际哈希，
+> validate 仍会校验该文件存在且哈希一致。等价件不进入 MinerU 批次（`CommittedStates` 不含该状态）。
 
 ## 幂等重跑规则
 
@@ -43,6 +59,8 @@ planned → preflight_failed
 2. 对于状态为 `failed` / `failed_partial_deleted` 的 item：检查 preflight 后从 `planned` 开始重新处理。
 
 3. 对于非 terminal 状态（`copied_temp`、`verified_temp`）：视为上次运行异常中断，检查 temp 路径是否仍存在，清理后重新处理。
+
+4. 对于状态为 `skipped_equivalent_content` 的 item：其目标文件属库内既有件，重跑时按等价判定重走一次（幂等，结果不变）。
 
 ## Apply Lock
 

@@ -16,6 +16,8 @@ $script:Cases = @(
     'approval_default_pending',
     'approval_hash_mismatch',
     'target_exists',
+    'apply_equivalent_content_skipped',
+    'apply_collision_different_content',
     'source_changed',
     'obsidian_artifacts_excluded',
     'already_committed_idempotent',

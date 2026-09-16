@@ -12,6 +12,9 @@ param(
 Set-StrictMode -Version Latest
 
 $script:Utf8NoBom = [System.Text.UTF8Encoding]::new($false)
+# 同文不同壳（文本层完全一致，仅字体嵌入/保存工具等非文本字节不同）视为"该内容已在库内归档"。
+# 仅对能可靠取文本层的 zip 容器格式生效；其余格式一律维持撞名 fail-closed，不猜测。
+$script:EquivalentComparableExtensions = @('.docx', '.xlsx', '.xlsm')
 $script:RequiredConfigFields = @('inboxRoot', 'archiveRoot', 'rawSourcesRoot', 'reviewRoot', 'themeList', 'scope')
 $script:RequiredApprovalFields = @(
     'status',
@@ -437,6 +440,68 @@ function New-ApplyManifestEntry {
     }
 }
 
+function Get-ArchiveTextSignature {
+    param([Parameter(Mandatory = $true)][string]$Path)
+
+    $extension = [System.IO.Path]::GetExtension($Path).ToLowerInvariant()
+    if ($script:EquivalentComparableExtensions -notcontains $extension) { return $null }
+
+    try {
+        Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue | Out-Null
+        $archive = [System.IO.Compression.ZipFile]::OpenRead($Path)
+        try {
+            $parts = [System.Collections.Generic.List[string]]::new()
+            if ($extension -eq '.docx') {
+                $parts.Add('word/document.xml')
+            } else {
+                foreach ($entry in @($archive.Entries)) {
+                    if ($entry.FullName -match '^xl/(sharedStrings|worksheets/sheet[^/]*)\.xml$') { $parts.Add($entry.FullName) }
+                }
+            }
+            $builder = [System.Text.StringBuilder]::new()
+            foreach ($name in $parts) {
+                $entry = $archive.GetEntry($name)
+                if ($null -eq $entry) { continue }
+                $reader = [System.IO.StreamReader]::new($entry.Open(), [System.Text.Encoding]::UTF8)
+                try {
+                    $xml = $reader.ReadToEnd()
+                } finally {
+                    $reader.Dispose()
+                }
+                foreach ($match in [regex]::Matches($xml, '<(?:w:t|t)(?:\s[^>]*)?>([^<]*)</(?:w:t|t)>')) {
+                    [void]$builder.Append([string]$match.Groups[1].Value)
+                }
+            }
+            # 归一化：去掉所有空白后再比较，避免换行/制表/空格差异造成假阴性
+            $signature = [regex]::Replace($builder.ToString(), '\s+', '')
+            if ([string]::IsNullOrEmpty($signature)) { return $null }
+            return $signature
+        } finally {
+            $archive.Dispose()
+        }
+    } catch {
+        return $null
+    }
+}
+
+function Test-EquivalentArchivedContent {
+    param(
+        [Parameter(Mandatory = $true)][string]$SourcePath,
+        [Parameter(Mandatory = $true)][string]$TargetPath
+    )
+
+    if ([System.IO.Path]::GetExtension($SourcePath).ToLowerInvariant() -ne [System.IO.Path]::GetExtension($TargetPath).ToLowerInvariant()) {
+        return $false
+    }
+
+    $sourceSignature = Get-ArchiveTextSignature -Path $SourcePath
+    if ([string]::IsNullOrEmpty($sourceSignature)) { return $false }
+    $targetSignature = Get-ArchiveTextSignature -Path $TargetPath
+    if ([string]::IsNullOrEmpty($targetSignature)) { return $false }
+
+    return $sourceSignature.Equals($targetSignature, [System.StringComparison]::Ordinal)
+}
+
 function Get-CurrentSnapshotRow {
     param(
         [Parameter(Mandatory = $true)][object]$InventoryItem,
@@ -852,9 +917,17 @@ function Invoke-ApprovedPlanApply {
             }
 
             if ($targetExists) {
+                # 同文不同壳：目标已存在但字节不同，若文本层完全一致则视为该内容已归档，
+                # 不复制、不产出 raw（内容与库内件等价，重解析不增加知识）；非可比格式维持 fail-closed。
+                if (Test-EquivalentArchivedContent -SourcePath $sourcePath -TargetPath $targetArchivePath) {
+                    $targetHash = (Get-FileHash -Algorithm SHA256 -LiteralPath $targetArchivePath).Hash.ToLowerInvariant()
+                    $applyEntries.Add((New-ApplyManifestEntry -SourceId $sourceId -RunId $runId -State 'skipped_equivalent_content' -SourcePath $sourcePath -SourceSha256 $sourceSha256 -ArchivePath $targetArchivePath -ArchiveSha256 $targetHash -TempPath $null -Attempt $nextAttempt -ErrorCode $null -Message 'equivalent content already archived (text layer identical); archive copy and raw ingest both skipped'))
+                    continue
+                }
+
                 $applySucceeded = $false
                 $errorCode = 'target_exists'
-                Write-ApplyError -What 'Archive target already exists' -Where $targetArchivePath -Expected 'No file at final archive target unless it is an exact committed match' -Fix 'Pick a different proposal or resolve the collision manually before re-applying.'
+                Write-ApplyError -What 'Archive target already exists' -Where $targetArchivePath -Expected 'No file at final archive target unless it is an exact committed match or text-equivalent content' -Fix 'Pick a different proposal or resolve the collision manually before re-applying.'
                 $applyEntries.Add((New-ApplyManifestEntry -SourceId $sourceId -RunId $runId -State 'preflight_failed' -SourcePath $sourcePath -SourceSha256 $sourceSha256 -ArchivePath $targetArchivePath -ArchiveSha256 (Get-FileHash -Algorithm SHA256 -LiteralPath $targetArchivePath).Hash.ToLowerInvariant() -TempPath $null -Attempt $nextAttempt -ErrorCode $errorCode -Message 'target archive file already exists'))
                 $failureRows.Add([ordered]@{
                         run_id        = $runId

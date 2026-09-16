@@ -44,7 +44,7 @@ $script:InventoryFields = @('source_id', 'run_id', 'abs_path', 'rel_path', 'size
 $script:PlanFields = @('source_id', 'run_id', 'action', 'source_abs_path', 'source_rel_path', 'source_sha256', 'target_archive_path', 'target_theme', 'target_year', 'enter_raw_sources', 'mineru_candidate', 'confidence', 'review_needed', 'reason_codes')
 $script:ManifestFields = @('schema_version', 'run_id', 'scope', 'created_at', 'config_sha256', 'inventory_sha256', 'source_snapshot_before_sha256', 'classification_plan_sha256', 'item_count', 'review_needed_count', 'actions', 'artifact_paths')
 $script:ApplyFields = @('source_id', 'run_id', 'state', 'source_path', 'source_sha256', 'archive_path', 'archive_sha256', 'attempt', 'timestamp')
-$script:ApplyStates = @('planned', 'copied_temp', 'committed', 'failed', 'skipped_existing_committed', 'preflight_failed', 'verified_temp', 'failed_partial_deleted', 'failed_divergent', 'skipped')
+$script:ApplyStates = @('planned', 'copied_temp', 'committed', 'failed', 'skipped_existing_committed', 'skipped_equivalent_content', 'preflight_failed', 'verified_temp', 'failed_partial_deleted', 'failed_divergent', 'skipped')
 $script:BatchRootFields = @('schema_version', 'run_id', 'created_at', 'state_path', 'polling_budget_seconds', 'output_stem_mapping', 'quality_gate_policy', 'items')
 $script:BatchFields = @('source_id', 'archive_path', 'archive_sha256', 'extension', 'mineru_route', 'processor', 'api_family', 'model_version', 'requires_token_env', 'forbidden_processors', 'output_dir', 'raw_target_hint')
 $script:BatchRoutes = @('convert_with_mineru', 'convert_with_mineru_html', 'lifecycle_runner', 'mock', 'skip_unsupported', 'conditional')
@@ -509,7 +509,7 @@ function Test-ApplyManifest {
         if (-not (Test-Sha256Text -Value ([string]$entry.source_sha256) -Where "$Path -> $($entry.source_id).source_sha256")) { $valid = $false }
         $latestBySourceId[[string]$entry.source_id] = $entry
 
-        if ($state -in @('committed', 'skipped_existing_committed')) {
+        if ($state -in @('committed', 'skipped_existing_committed', 'skipped_equivalent_content')) {
             $committedCount++
             if (-not (Test-Sha256Text -Value ([string]$entry.archive_sha256) -Where "$Path -> $($entry.source_id).archive_sha256")) { $valid = $false }
             $archivePath = [string]$entry.archive_path

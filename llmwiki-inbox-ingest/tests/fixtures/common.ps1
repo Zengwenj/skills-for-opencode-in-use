@@ -21,6 +21,50 @@ function Write-FixtureFile {
     [System.IO.File]::WriteAllText($Path, $Content, $script:Utf8NoBom)
 }
 
+function New-FixtureDocxFile {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Text,
+        [Parameter(Mandatory = $false)][int]$PaddingBytes = 0
+    )
+
+    $parent = Split-Path -Path $Path -Parent
+    if (-not (Test-Path -LiteralPath $parent -PathType Container)) {
+        New-Item -ItemType Directory -Path $parent -Force | Out-Null
+    }
+
+    Add-Type -AssemblyName System.IO.Compression.FileSystem -ErrorAction SilentlyContinue | Out-Null
+    if (Test-Path -LiteralPath $Path -PathType Leaf) { Remove-Item -LiteralPath $Path -Force }
+    $archive = [System.IO.Compression.ZipFile]::Open($Path, [System.IO.Compression.ZipArchiveMode]::Create)
+    try {
+        $documentXml = '<?xml version="1.0" encoding="UTF-8"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main"><w:body><w:p><w:r><w:t>' + $Text + '</w:t></w:r></w:p></w:body></w:document>'
+        foreach ($pair in @(@('word/document.xml', $documentXml), @('[Content_Types].xml', '<?xml version="1.0" encoding="UTF-8"?><Types/>'))) {
+            $entry = $archive.CreateEntry([string]$pair[0], [System.IO.Compression.CompressionLevel]::Optimal)
+            $stream = $entry.Open()
+            try {
+                $bytes = [System.Text.Encoding]::UTF8.GetBytes([string]$pair[1])
+                $stream.Write($bytes, 0, $bytes.Length)
+            } finally {
+                $stream.Dispose()
+            }
+        }
+        if ($PaddingBytes -gt 0) {
+            # 非文本字节差异（模拟"同文不同壳"：字体表/压缩差异导致体积不同）
+            $entry = $archive.CreateEntry('word/fontTable.xml', [System.IO.Compression.CompressionLevel]::NoCompression)
+            $stream = $entry.Open()
+            try {
+                $bytes = New-Object byte[] $PaddingBytes
+                (New-Object System.Random 13).NextBytes($bytes)
+                $stream.Write($bytes, 0, $bytes.Length)
+            } finally {
+                $stream.Dispose()
+            }
+        }
+    } finally {
+        $archive.Dispose()
+    }
+}
+
 function New-FixtureWorkspace {
     param([Parameter(Mandatory = $true)][string]$Name)
 
